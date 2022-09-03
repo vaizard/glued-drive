@@ -1,0 +1,44 @@
+---
+routes:
+
+    #########################################################
+    # STOR / NODES                                          #
+    #########################################################
+
+    be_stor:
+        service:    stor
+        path:       /api/stor
+        pattern:    /api/stor
+        label:      stor
+        dscr:       A routegroup, no methods here.
+
+    #########################################################
+    # STOR / HEALTH                                         #
+    #########################################################
+
+    be_stor_health_v1:
+        pattern:    ${routes.be_stor.path}/health/v1
+        path:       ${routes.be_stor.path}/health/v1
+        label:      stor health
+        dscr:       A healthcheck endpoint for the microservice.
+        service:    stor
+        methods:
+            get:    Glued\Controllers\ServiceController:health
+
+
+    #########################################################
+    # STOR / DRIVE                                          #
+    #########################################################
+
+    be_stor_drive_r_v1:
+        pattern:    ${routes.be_stor.path}/drive/v1
+        path:       ${routes.be_stor.path}/drive/v1
+        label:      space
+        dscr:       Browse stor spaces
+        service:    stor
+        methods:
+            get:    Glued\Controllers\ServiceController:space_get
+            post:   Glued\Controllers\ServiceController:space_post
+
+
+

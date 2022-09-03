@@ -1,2 +1,2 @@
-# glued-drive
+# glued-stor
 Content aware storage microservice.
