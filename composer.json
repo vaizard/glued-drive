@@ -1,6 +1,6 @@
 {
-  "name": "vaizard/glued-cashflow",
-  "description": "A fio.cz integration component.",
+  "name": "vaizard/glued-stor",
+  "description": "A file storage microservice for the Glued project.",
   "license": "MIT",
   "authors": [
     {
@@ -9,7 +9,7 @@
     }
   ],
   "require": {
-    "php": "^8",
+    "php": "^8.1",
     "ext-apcu": "*",
     "ext-bcmath": "*",
     "ext-curl": "*",
@@ -22,31 +22,53 @@
     "ext-readline": "*",
     "ext-soap": "*",
     "ext-xml": "*",
-    "grasmash/yaml-expander": "^3",
+    "facile-it/php-openid-client": "dev-master",
+    "foxy/foxy": "^v1.2.1",
+    "geocoder-php/geoip2-provider": "^4",
+    "guzzlehttp/psr7": "^1",
+    "http-interop/http-factory-guzzle": "^1",
     "league/flysystem": "^3",
+    "middlewares/trailing-slash": "^2",
     "monolog/monolog": "^2",
     "nyholm/psr7": "^1",
     "opis/json-schema": "^2",
     "php-di/php-di": "^6",
+    "php-http/guzzle7-adapter": "^1",
     "php-http/message": "^1",
     "phpfastcache/phpfastcache": "^9",
-    "ramsey/uuid": "^4",
-    "respect/validation": "^2",
     "sabre/event": "^5",
-    "selective/transformer": "^1",
     "slim/http": "^1",
     "slim/slim": "^4",
+    "symfony/mailer": "^6",
     "symfony/yaml": "^5",
     "thingengineer/mysqli-database-class": "dev-master#42116651a88b57b03fd967bc57dd38f5094565d9",
-    "atgp/factur-x": "^1",
+    "tuupola/slim-jwt-auth": "^3",
+    "voku/anti-xss": "^4",
+    "zeuxisoo/slim-whoops": "^0.7",
+    "symfony/config": "^5",
+    "selective/transformer": "^1",
+    "casbin/database-adapter": "^1",
+    "ramsey/uuid": "^4",
     "vaizard/glued-lib": "dev-main",
-    "zeuxisoo/slim-whoops": "^0.7"
+    "grasmash/yaml-expander": "^3",
+    "vlucas/phpdotenv": "^5",
+    "keiko/uuid-shortener": "^0.6.1",
+    "shuchkin/simplexlsxgen": "^1.2",
+    "youthweb/urllinker": "^1.4",
+    "galbar/jsonpath": "^2.1"
+  },
+  "suggest": {
+    "ext-xdebug": "For dev only"
   },
   "require-dev": {
     "ergebnis/composer-normalize": "^2"
   },
-  "suggest": {
-    "ext-xdebug": "For dev only"
+  "autoload": {
+    "psr-4": {
+      "Glued\\": "glued/"
+    },
+    "files": [
+    ]
   },
   "repositories": [
     {
@@ -57,26 +79,7 @@
   ],
   "minimum-stability": "dev",
   "prefer-stable": true,
-  "autoload": {
-    "psr-4": {
-      "Glued\\": "glued/"
-    },
-    "files": []
-  },
-  "config": {
-    "allow-plugins": {
-      "ergebnis/composer-normalize": true
-    }
-  },
   "scripts": {
-    "post-install-cmd": [
-      "composer configure || echo \"[FAIL] Failed to configure glued. Please make sure all env variables are set. Rerun composer configure.\"",
-      "echo \"Run `composer nginx` manually to pick restart this microservice\""
-    ],
-    "post-update-cmd": [
-      "composer configure || echo \"[FAIL] Failed to configure glued. Please make sure all env variables are set. Rerun composer configure.\"",
-      "echo \"Run `composer nginx` manually to pick restart this microservice\""
-    ],
     "backup": [
       "vendor/vaizard/glued-lib/src/Scripts/backup.sh"
     ],
@@ -85,12 +88,36 @@
       "Glued\\Lib\\ComposerHooks::configTool",
       "vendor/vaizard/glued-lib/src/Scripts/cacheroutes.sh"
     ],
+    "genkey": [
+      "Glued\\Lib\\ComposerHooks::genKey"
+    ],
     "migrate": [
       "vendor/vaizard/glued-lib/src/Scripts/migrate.sh"
     ],
     "nginx": [
-      "vendor/vaizard/glued-lib/src/Scripts/nginx.sh"
+      "vendor/vaizard/glued-lib/src/Scripts/nginx.sh",
+      "Glued\\Lib\\ComposerHooks::generateNginx",
+      "vendor/vaizard/glued-lib/src/Scripts/nginx-reload.sh"
+    ],
+    "post-install-cmd": [
+      "composer configure || echo \"[FAIL] Failed to configure glued. Please make sure all env variables are set. Rerun composer configure.\"",
+      "composer migrate",
+      "echo \"Run 'composer nginx' manually to pick restart this microservice\""
+    ],
+    "post-update-cmd": [
+      "composer configure || echo \"[FAIL] Failed to configure glued. Please make sure all env variables are set. Rerun composer configure.\"",
+      "composer migrate",
+      "echo \"Run 'composer nginx' manually to pick restart this microservice\""
+    ],
+    "settings": [
+      "Glued\\Lib\\ComposerHooks::PrintSettings"
     ],
     "start": "php -S localhost:8080 -t public"
+  },
+  "config": {
+    "allow-plugins": {
+      "ergebnis/composer-normalize": true,
+      "foxy/foxy": true
+    }
   }
 }

@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use Alcohol\ISO4217;
 use Casbin\Enforcer;
 use Casbin\Util\BuiltinOperations;
 use DI\Container;
@@ -9,24 +10,28 @@ use Facile\OpenIDClient\Client\Metadata\ClientMetadata;
 use Facile\OpenIDClient\Issuer\IssuerBuilder;
 use Facile\OpenIDClient\Service\Builder\AuthorizationServiceBuilder;
 use Glued\Lib\Auth;
+use Glued\Lib\Exceptions\InternalException;
 use Glued\Lib\Utils;
+use Goutte\Client;
+use Grasmash\YamlExpander\YamlExpander;
 use GuzzleHttp\Client as Guzzle;
 use Http\Discovery\Psr17FactoryDiscovery;
 use Keiko\Uuid\Shortener\Dictionary;
 use Keiko\Uuid\Shortener\Shortener;
 use Monolog\Handler\StreamHandler;
+use Monolog\Level;
 use Monolog\Logger;
 use Monolog\Processor\UidProcessor;
 use Nyholm\Psr7\getParsedBody;
+use Opis\JsonSchema\Validator;
 use Phpfastcache\CacheManager;
 use Phpfastcache\Config\ConfigurationOption;
 use Phpfastcache\Helper\Psr16Adapter;
 use Psr\Log\NullLogger;
 use Sabre\Event\Emitter;
 use Selective\Transformer\ArrayTransformer;
+use Symfony\Component\Yaml\Yaml;
 use voku\helper\AntiXSS;
-use Glued\Lib\Exceptions\InternalException;
-
 
 $container->set('events', function () {
     return new Emitter();
@@ -34,7 +39,7 @@ $container->set('events', function () {
 
 $container->set('fscache', function () {
     try {
-        $path = $_ENV['datapath'].'/'.basename(__ROOT__).'/cache/psr16';
+        $path = $_ENV['DATAPATH'].'/'.basename(__ROOT__).'/cache/psr16';
         CacheManager::setDefaultConfig(new ConfigurationOption([
             "path" => $path,
             "itemDetailedDate" => false,
@@ -52,59 +57,31 @@ $container->set('memcache', function () {
     return new Psr16Adapter('apcu');
 });
 
-$container->set('settings', function() {
-    /**
-     * Configuration is constructed as follows:
-     * 
-     * - Load .env file, don't override existing $_ENV values (bootstrap.php)
-     * - Provide fallback values for undefined env variables
-     * - Load and parse the yaml configs
-     * - Replace yaml references with $_ENV and defaults/fallbacks,
-     *   $_ENV has precedence.
-     * - TODO Cache the result
-     * - Return the result
-     */
-
-    $ret      = [];
-    $routes   = [];
-    $fallback = [
-        'env' => [
-            'hostname'  => $_SERVER['SERVER_NAME'] ?? 'localhost', 
-            'rootpath'  => __ROOT__,
-            'uservice'  => basename(__ROOT__),
-            'identity'  => 'id.industra.space',
-            'mysql_hostname' => 'localhost',
-            'mysql_database' => 'glued',
-            'mysql_username' => 'glued',
-            'mysql_password' => 'glued-pw',
-        ],       
+$container->set('settings', function () {
+    // Initialize
+    $class_sy = new Yaml;
+    $class_ye = new YamlExpander(new NullLogger());
+    $ret = [];
+    $routes = [];
+    $seed = [
+        'HOSTNAME' => $_SERVER['SERVER_NAME'] ?? gethostbyname(php_uname('n')),
+        'ROOTPATH' => __ROOT__,
+        'USERVICE' => basename(__ROOT__)
     ];
 
-    // Init yaml parsing
-    $class_sy = new \Symfony\Component\Yaml\Yaml;
-    $class_ye = new Grasmash\YamlExpander\YamlExpander(new NullLogger());
-
-#    foreach (glob(__ROOT__ . '/glued/Config/defaults.php') as $configfile) {
-#        $ret = array_merge_recursive($ret, require_once($configfile));
-#    }
-    
-    // Load and parse the yaml configs
-    $files = __ROOT__ . '/glued/Config/defaults.yaml';
+    // Load and parse the yaml configs. Replace yaml references with $_ENV and $seed ($_ENV has precedence)
+    $files = __ROOT__ . '/vendor/vaizard/glued-lib/src/defaults.yaml';
     $yaml = file_get_contents($files);
     $array = $class_sy->parse($yaml, $class_sy::PARSE_CONSTANT);
-
-    // Replace yaml references with $_ENV and defaults/fallbacks,
-    // $_ENV has precedence.
-    $refs['env'] = array_merge($fallback['env'], $_ENV);
-    // Replace yaml references with data provided in $refs
+    $refs['env'] = array_merge($seed, $_ENV);
     $ret = $class_ye->expandArrayProperties($array, $refs);
 
     // Read the routes
-    $files = glob(__ROOT__ . '/glued/Config/routes.yaml');
+    $files = glob($ret['glued']['datapath'] . '/*/cache/routes.yaml');
     foreach ($files as $file) {
         $yaml = file_get_contents($file);
         $array = $class_sy->parse($yaml);
-        $routes = array_merge($routes, $class_ye->expandArrayProperties($array)['routes'] );
+        $routes = array_merge($routes, $class_ye->expandArrayProperties($array)['routes']);
     }
 
     $ret['routes'] = $routes;
@@ -162,68 +139,8 @@ $container->set('jsonvalidator', function () {
 });
 
 $container->set('routecollector', $app->getRouteCollector());
+
 $container->set('responsefactory', $app->getResponseFactory());
-
-/**
- * Casbin enforcer
- */
-$container->set('enforcer', function (Container $c) {
-    $s = $c->get('settings');
-    $adapter = __ROOT__ . '/private/cache/casbin.csv';
-    /*
-    if ($s['casbin']['adapter'] == 'database')
-        $adapter = DatabaseAdapter::newAdapter([
-            'type'     => 'mysql',
-            'hostname' => $s['db']['host'],
-            'database' => $s['db']['database'],
-            'username' => $s['db']['username'],
-            'password' => $s['db']['password'],
-            'hostport' => '3306',
-        ]);*/
-    $e = new Enforcer($s['casbin']['modelconf'], $adapter);
-
-    $e->addNamedMatchingFunc('g', 'keyMatch2', function (string $key1, string $key2) {
-        return BuiltinOperations::keyMatch2($key1, $key2);
-    });
-    $e->addNamedDomainMatchingFunc('g', 'keyMatch2', function (string $key1, string $key2) {
-        return BuiltinOperations::keyMatch2($key1, $key2);
-    });
-    return $e;
-});
-
-$container->set('oidc_adm', function (Container $c) {
-    $s = $c->get('settings')['oidc'];
-    $client = \Keycloak\Admin\KeycloakClient::factory([
-        'baseUri'   => $s['server'],
-        'realm'     => $s['realm'],
-        'client_id' => $s['client']['admin']['id'],
-        'username'  => $s['client']['admin']['user'],
-        'password'  => $s['client']['admin']['pass']
-    ]);
-    return $client;
-});
-
-$container->set('oidc_cli', function (Container $c) {
-    $s = $c->get('settings')['oidc'];
-    $issuer = (new IssuerBuilder())->build($s['uri']['discovery']);
-    $clientMetadata = ClientMetadata::fromArray([
-        'client_id'     => $s['client']['confidential']['id'],
-        'client_secret' => $s['client']['confidential']['secret'],
-        'token_endpoint_auth_method' => 'client_secret_basic', // the auth method to the token endpoint
-        'redirect_uris' => $s['uri']['redirect']
-    ]);
-    $client = (new ClientBuilder())
-        ->setIssuer($issuer)
-        ->setClientMetadata($clientMetadata)
-        ->build();
-    return $client;
-});
-
-$container->set('oidc_svc', function (Container $c) {
-    $s = $c->get('settings')['oidc'];
-    $service = (new AuthorizationServiceBuilder())->build();
-    return $service;
-});
 
 $container->set('iso4217', function() {
     return new Alcohol\ISO4217();
@@ -241,17 +158,24 @@ $container->set('mailer', function (Container $c) {
     return $mailer;
 });
 
+$container->set('sqlsrv', function (Container $c) {
+    $srv = $c->get('settings')['sqlsrv']['hostname'];
+    $cnf = [
+       "Database" => $c->get('settings')['sqlsrv']['database'],
+       "UID" =>  $c->get('settings')['sqlsrv']['username'],
+       "PWD" =>  $c->get('settings')['sqlsrv']['password']
+    ];
+
+    $conn = sqlsrv_connect($srv,$cnf);
+    if ($conn) {
+        return $conn;
+    }
+    throw new Exception("MSSQL error.");
+});
 
 // *************************************************
 // GLUED CLASSES ***********************************
 // ************************************************* 
-
-// Form-data validation helper (send validation results
-// via session to the original form upon failure)
-$container->set('validator', function (Container $c) {
-   return new Glued\Classes\Validation\Validator;
-});
-
 
 $container->set('auth', function (Container $c) {
     return new Auth($c->get('settings'), 

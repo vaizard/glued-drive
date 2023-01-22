@@ -27,18 +27,47 @@ routes:
 
 
     #########################################################
-    # STOR / DRIVE                                          #
+    # STOR / SPACES                                         #
     #########################################################
 
-    be_stor_drive_r_v1:
-        pattern:    ${routes.be_stor.path}/drive/v1
-        path:       ${routes.be_stor.path}/drive/v1
-        label:      space
+    be_stor_spaces_v1:
+        pattern:    ${routes.be_stor.path}/spaces/v1
+        path:       ${routes.be_stor.path}/spaces/v1
+        label:      spaces
         dscr:       Browse stor spaces
         service:    stor
         methods:
-            get:    Glued\Controllers\ServiceController:space_get
-            post:   Glued\Controllers\ServiceController:space_post
+            get:    Glued\Controllers\ServiceController:spaces_r1
+            post:   Glued\Controllers\ServiceController:spaces_w1
 
+    #########################################################
+    # STOR / FILES                                          #
+    #########################################################
 
+    be_stor_files_v1:
+        pattern:    ${routes.be_stor.path}/files/v1
+        path:       ${routes.be_stor.path}/files/v1
+        label:      files
+        dscr:       Handling files
+        service:    stor
+        methods:
+            get:    Glued\Controllers\ServiceController:files_r1
+            post:   Glued\Controllers\ServiceController:files_w1
+
+    #########################################################
+    # STOR / ANNOTATIONS                                    #
+    #########################################################
+
+    be_stor_annotations_v1:
+        pattern:    ${routes.be_stor.path}/annotations/v1
+        path:       ${routes.be_stor.path}/annotations/v1
+        label:      annotations
+        dscr:       Doccument annotator
+        service:    stor
+        methods:
+            get:    Glued\Controllers\ServiceController:annotations_r1
+            post:   Glued\Controllers\ServiceController:annotations_w1
+            patch:  Glued\Controllers\ServiceController:annotations_w1
+            put:    Glued\Controllers\ServiceController:annotations_w1
+            delete: Glued\Controllers\ServiceController:annotations_d1
 
