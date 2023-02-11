@@ -8,6 +8,8 @@ server {
         ##########################
 
         client_max_body_size 8000M;
+        client_header_timeout 1800s;
+        client_body_timeout 1800s;
         root /var/www/html/glued-stor/public;
         listen 8008 ssl http2 default_server;
         listen [::]:8008 ssl http2 default_server;
