@@ -55,6 +55,7 @@ class ServiceController extends AbstractController
         throw new \Exception('Stub method served where it shouldnt. Proxy misconfigured?');
     }
 
+
     /**
      * Returns a health status response.
      * @param  Request  $request  
@@ -70,6 +71,31 @@ class ServiceController extends AbstractController
                 'params' => $params,
                 'service' => basename(__ROOT__),
             ];
+        $sys['os'] = PHP_OS;
+        foreach ($this->settings['stor']['devices'] as $d) {
+            if ( $d['name'] == 'default' ) { $d['path'] = $this->settings['glued']['datapath']; }
+            if ( $d['name'] == 'tmp' ) { $d['path'] = sys_get_temp_dir(); }
+            $d['health'] = 'unknown';
+            $d['status']['message'] = 'device status retrieval unsupported';
+            if ( $d['adapter'] == 'filesystem' and PHP_OS == 'Linux') {
+                if (is_dir($d['path'])) {
+                    $output = json_decode(shell_exec('findmnt -DJv --output fstype,source,target,fsroot,options,size,used,avail,use%,uuid,partuuid --target ' . $d['path']));
+                    $d['status'] = (array) $output->filesystems[0];
+                    if (is_writable($d['path'])) {
+                        $d['health'] = 'online';
+                        $d['status']['message'] = 'ok';
+                    } else {
+                        $d['health'] = 'degraded';
+                        $d['status']['message'] = 'path is not writable';
+                    }
+                } else {
+                    $d['health'] = 'offline';
+                    $d['status']['message'] = $d['path'].' is not a directory or is missing.';
+                }
+            }
+            $sys['devices'][] = $d;
+        }
+        $data[basename(__ROOT__)] = $sys;
         return $response->withJson($data);
     }
 
