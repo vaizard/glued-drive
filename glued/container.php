@@ -10,6 +10,7 @@ use Facile\OpenIDClient\Client\Metadata\ClientMetadata;
 use Facile\OpenIDClient\Issuer\IssuerBuilder;
 use Facile\OpenIDClient\Service\Builder\AuthorizationServiceBuilder;
 use Glued\Lib\Auth;
+use Glued\Lib\Notify;
 use Glued\Lib\Exceptions\InternalException;
 use Glued\Lib\Utils;
 use Goutte\Client;
@@ -33,6 +34,8 @@ use Selective\Transformer\ArrayTransformer;
 use Symfony\Component\Yaml\Yaml;
 use voku\helper\AntiXSS;
 
+
+
 $container->set('events', function () {
     return new Emitter();
 });
@@ -51,10 +54,20 @@ $container->set('fscache', function () {
 });
 
 $container->set('memcache', function () {
-    CacheManager::setDefaultConfig(new ConfigurationOption([
-        "defaultTtl" => 60,
-    ]));
-    return new Psr16Adapter('apcu');
+    try {
+        $path = $_ENV['DATAPATH'] . '/' . basename(__ROOT__) . '/cache/psr16';
+        CacheManager::setDefaultConfig(new ConfigurationOption([
+            "defaultTtl" => 3600,
+            'fallback' => [
+                'driver' => 'files',
+                "path" => $path,
+                'fallbackAutoload' => true,
+            ],
+        ]));
+        return new Psr16Adapter('apcu');
+    } catch (Exception $e) {
+        throw new InternalException($e, "Memory cache initialization failed", $e->getCode());
+    }
 });
 
 $container->set('settings', function () {
@@ -68,13 +81,18 @@ $container->set('settings', function () {
         'ROOTPATH' => __ROOT__,
         'USERVICE' => basename(__ROOT__)
     ];
+    $refs['env'] = array_merge($seed, $_ENV);
 
     // Load and parse the yaml configs. Replace yaml references with $_ENV and $seed ($_ENV has precedence)
-    $files = __ROOT__ . '/vendor/vaizard/glued-lib/src/defaults.yaml';
-    $yaml = file_get_contents($files);
-    $array = $class_sy->parse($yaml, $class_sy::PARSE_CONSTANT);
-    $refs['env'] = array_merge($seed, $_ENV);
-    $ret = $class_ye->expandArrayProperties($array, $refs);
+    // TODO replicate foreach below to other microservices.
+    // TODO document in readme that no recursive array_merge is done and that you intentionally have to repeat defaults or alternatively use extensions such as 'overwrite' and 'append' to differentate and merge arrays recursively (or not) accordingly
+    $files[] = __ROOT__ . '/vendor/vaizard/glued-lib/src/defaults.yaml';
+    $files = array_merge($files, glob($refs['env']['DATAPATH'] . '/glued-stor/config/*.yaml'));
+    foreach ($files as $file) {
+        $yaml = file_get_contents($file);
+        $array = $class_sy->parse($yaml, $class_sy::PARSE_CONSTANT);
+        $ret = array_merge($ret, $class_ye->expandArrayProperties($array, $refs));
+    }
 
     // Read the routes
     $files = glob($ret['glued']['datapath'] . '/*/cache/routes.yaml');
@@ -199,7 +217,12 @@ $container->set('stor', function (Container $c) {
 */
 $container->set('crypto', function () {
     // TODO cleanup codebase from Crypto initialization
-    return new Glued\Classes\Crypto\Crypto();
+    return new Glued\Lib\Crypto();
+});
+
+$container->set('notify', function (Container $c) {
+    // TODO cleanup codebase from Crypto initialization
+    return new Glued\Lib\Notify($c->get('settings'), $c->get('logger'));
 });
 
 $container->set('reqfactory', function () {
