@@ -25,49 +25,57 @@ routes:
         methods:
             get:    Glued\Controllers\ServiceController:health
 
-
-    #########################################################
-    # STOR / SPACES                                         #
-    #########################################################
-
-    be_stor_spaces_v1:
-        pattern:    ${routes.be_stor.path}/spaces/v1
-        path:       ${routes.be_stor.path}/spaces/v1
-        label:      spaces
-        dscr:       Browse stor spaces
+    be_stor_health_dgs_v1:
+        pattern:    ${routes.be_stor.path}/health/dgs/v1[/{uuid}]
+        path:       ${routes.be_stor.path}/health/dgs/v1
+        label:      stor health
+        dscr:       A healthcheck endpoint for the microservice.
         service:    stor
         methods:
-            get:    Glued\Controllers\ServiceController:spaces_r1
-            post:   Glued\Controllers\ServiceController:spaces_w1
+            get:    Glued\Controllers\ServiceController:healthDgs
+
 
     #########################################################
-    # STOR / FILES                                          #
+    # STOR / BUCKETS                                        #
     #########################################################
 
-    be_stor_files_v1:
-        pattern:    ${routes.be_stor.path}/files/v1
-        path:       ${routes.be_stor.path}/files/v1
-        label:      files
-        dscr:       Handling files
+    be_stor_buckets_v1:
+        pattern:    ${routes.be_stor.path}/buckets/v1
+        path:       ${routes.be_stor.path}/buckets/v1
+        label:      Buckets
+        dscr:       Isolated data buckets
         service:    stor
         methods:
-            get:    Glued\Controllers\ServiceController:files_r1
-            post:   Glued\Controllers\ServiceController:files_w1
+            get:    Glued\Controllers\ServiceController:buckets_r1
+            post:   Glued\Controllers\ServiceController:buckets_c1
 
     #########################################################
-    # STOR / ANNOTATIONS                                    #
+    # STOR / OBJECTS                                        #
     #########################################################
 
-    be_stor_annotations_v1:
-        pattern:    ${routes.be_stor.path}/annotations/v1
-        path:       ${routes.be_stor.path}/annotations/v1
-        label:      annotations
-        dscr:       Doccument annotator
+    be_stor_objects_v1:
+        pattern:    ${routes.be_stor.path}/objects/v1[/{bucket}[/{object}]]
+        path:       ${routes.be_stor.path}/objects/v1
+        label:      objects
+        dscr:       Data objects
         service:    stor
         methods:
-            get:    Glued\Controllers\ServiceController:annotations_r1
-            post:   Glued\Controllers\ServiceController:annotations_w1
-            patch:  Glued\Controllers\ServiceController:annotations_w1
-            put:    Glued\Controllers\ServiceController:annotations_w1
-            delete: Glued\Controllers\ServiceController:annotations_d1
+            get:    Glued\Controllers\ServiceController:objects_r1
+            post:   Glued\Controllers\ServiceController:objects_c1
 
+
+    #########################################################
+    # STOR / LINKS                                          #
+    #########################################################
+
+    be_stor_links_v1:
+        pattern:    ${routes.be_stor.path}/links/v1[/{bucket}[/{link}]]
+        path:       ${routes.be_stor.path}/links/v1
+        label:      links
+        dscr:       File links
+        service:    stor
+        methods:
+            get:    Glued\Controllers\ServiceController:links_r1
+            post:   Glued\Controllers\ServiceController:links_c1
+            patch:  Glued\Controllers\ServiceController:links_u1
+            delete: Glued\Controllers\ServiceController:links_d1

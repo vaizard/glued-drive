@@ -3,7 +3,7 @@
 declare(strict_types=1);
 use DI\Container;
 use Glued\Lib\Middleware\TimerMiddleware;
-use Middlewares\TrailingSlash;
+use Glued\Lib\Middleware\TrailingSlash;
 use Nyholm\Psr7\Response as Psr7Response;
 use Slim\App;
 use Slim\Exception\HttpNotFoundException;
@@ -32,8 +32,13 @@ $app->addBodyParsingMiddleware();
 
 // TrailingSlash(false) removes the trailing from requests, for example
 // `https://example.com/user/` will change into https://example.com/user.
-// Optionally, setting redirect(true) enforces a 301 redirect.
-$trailingSlash = new TrailingSlash(false);
+// Setting redirect(true) enforces a 301 redirect. The second parameter
+// in TrailingSlash controls the inclusion of the port the Location header
+// of the redirect. Not including the port is wanted as this microservice
+// is supposed to run behind the nginx+glued-core as its auth proxy, otherwise
+// users would get redirected directly to the backend port.
+// TODO: fix glued-lib trailingSlash to do only path-based redirects (no full url)
+$trailingSlash = new TrailingSlash(false, false);
 $trailingSlash->redirect();
 $app->add($trailingSlash);
 
