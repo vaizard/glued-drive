@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Glued\Controllers;
 
+use Exception;
+use mysqli_sql_exception;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Glued\Classes\Exceptions\AuthTokenException;
@@ -11,16 +13,45 @@ use Glued\Classes\Exceptions\AuthJwtException;
 use Glued\Classes\Exceptions\AuthOidcException;
 use Glued\Classes\Exceptions\DbException;
 use Glued\Classes\Exceptions\TransformException;
+use Ramsey\Uuid\Uuid;
 
 class ServiceController extends AbstractController
 {
+
+    /// ///////////////////////////////////////////////////////////////////////////////
+    /// HELPER STUFF
+    /// ///////////////////////////////////////////////////////////////////////////////
+    private $pkey = 'jwV84GGVLq1SBewdbqtsY6haWHsKfmOy9MM6aW1RrnU7NmFelo';
+    /**
+     * Returns an exception.
+     * @param  Request  $request
+     * @param  Response $response
+     * @param  array    $args
+     * @return Response Json result set.
+     */
+    public function stub(Request $request, Response $response, array $args = []): Response {
+        throw new Exception('Stub method served where it shouldnt. Proxy misconfigured?');
+    }
+
+    function is_uuidv4($uuid) {
+        if (!is_string($uuid)) { return 0; }
+        $pattern = '/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i';
+        return preg_match($pattern, $uuid) === 1;
+    }
+
+    function is_valid_uuid($uuid)
+    {
+        $uuidv4_pattern = '/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i';
+        $uuidv1_pattern = '/^[0-9a-f]{8}-[0-9a-f]{4}-1[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i';
+        return preg_match($uuidv4_pattern, $uuid) || preg_match($uuidv1_pattern, $uuid);
+    }
 
     /**
      * @param $value accepts strings and numbers, such as (100, 100mb, 100g, etc.)
      * @param $from_unit forces the from unit (unit in value is ignored). Accepts: b, kb, KB, kB ... etc.
      * @param $to_unit defines target unit. If nothing provided, bytes are implied.
      * @return float|int
-     * @throws \Exception
+     * @throws Exception
      */
     public function convert_units($value, $from_unit = '', $to_unit = 'B') {
         $units = array('B' => 0, 'K' => 1, 'M' => 2, 'G' => 3, 'T' => 4);
@@ -31,8 +62,8 @@ class ServiceController extends AbstractController
             if ($from_unit == '') { $from_unit = 'B'; }
         }
         $value = preg_replace("/[^0-9\.]/", "", $value);
-        if (!array_key_exists($from_unit, $units)) throw new \Exception("Unexpected from unit provided.", 500);
-        if (!array_key_exists($to_unit, $units)) throw new \Exception("Unexpected to unit provided.", 500);
+        if (!array_key_exists($from_unit, $units)) throw new Exception("Unexpected from unit provided.", 500);
+        if (!array_key_exists($to_unit, $units)) throw new Exception("Unexpected to unit provided.", 500);
         $from_power = $units[$from_unit];
         $to_power = $units[$to_unit];
         $factor = pow(1024,  $from_power - $to_power );
@@ -40,237 +71,320 @@ class ServiceController extends AbstractController
     }
 
 
-
-
-
-
-    /**
-     * Returns an exception.
-     * @param  Request  $request  
-     * @param  Response $response 
-     * @param  array    $args     
-     * @return Response Json result set.
-     */
-    public function stub(Request $request, Response $response, array $args = []): Response {
-        throw new \Exception('Stub method served where it shouldnt. Proxy misconfigured?');
-    }
-
-    function is_uuidv4($uuid) {
-        $pattern = '/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i';
-        return preg_match($pattern, $uuid) === 1;
-    }
-
-    function dg_handle($uuid = 'default') {
-        if ($uuid == 'default') {
-            $filtered = array_filter($this->settings['stor']['dgs'], function ($dg) {
-                return isset($dg['default']) && $dg['default'] === true;
-            });
-            if (count($filtered)==0) { throw new \Exception("Configuration error: dg not found.", 500); }
-            if (count($filtered)>1) { throw new \Exception("Configuration error: multiple primary stor dgs defined.", 500); }
-            $uuid = array_keys($filtered)[0];
-        }
-        if (array_key_exists($uuid, $this->settings['stor']['dgs'])) { return $uuid; }
-        throw new \Exception("Configuration error: undefined stor dgs element requested.", 500);
-    }
+    /// ///////////////////////////////////////////////////////////////////////////////
+    /// DEVICES
+    /// ///////////////////////////////////////////////////////////////////////////////
 
     /**
-     * @param array $filter
-     * @param string $dg_uuid
-     * @return array returns array of devices fitting the $filter constraint within a device group
-     * @throws \Exception
+     * @param $d array device config
+     * @return array
      */
-    function dev_handle(array $filter = [ 'default' => true ], string $dg_uuid = 'default') {
-        $dg_uuid = $this->dg_handle($dg_uuid);
-        $filtered = $this->settings['stor']['devices'];
+    public function device_status(array $d): array {
+        $d['uri'] = $d['path'];
 
-        $filtered = array_filter($this->settings['stor']['devices'], function ($val) use ($dg_uuid, $filter) {
-            // Check if 'dg' is set and equal to $dg_uuid and $val contains all elements and values from $filter
-            if (isset($val['dg']) && $val['dg'] === $dg_uuid) {
-                return count(array_intersect_assoc($val, $filter)) === count($filter);
-            }
-            return false; // If 'dg' is not set or not equal to $dg_uuid, exclude the element.
-        });
-
-        // predefined devices not having a datapath overridden must get path generated
-        $key = '09e0ef57-86e6-4376-b466-a7d2af31474e';
-        if (array_key_exists($key, $filtered)) {
-            if (!isset($filtered[$key]['path']) || is_null($filtered[$key]['path'])) {
-                $filtered[$key]['path'] = $this->settings['glued']['datapath'] . '/' . basename(__ROOT__) . '/data';
-            }
-        }
-        $key = '86159ff5-f513-4852-bb3a-7f4657a35301';
-        if (array_key_exists($key, $filtered)) {
-            if (!isset($filtered[$key]['path']) || is_null($filtered[$key]['path'])) {
-                $filtered[$key]['path'] = sys_get_temp_dir();
-            }
+        $missingKeys = array_diff_key(array_flip(["uuid", "adapter", "uri"]), $d);
+        if (!empty($missingKeys)) {
+            $s = implode(', ', array_keys($missingKeys));
+            throw new Exception("Device status requested without {$s} defined.");
         }
 
-        // add device uuid as a value too
-        foreach ($filtered as $k=>&$v) {
-            $v['device'] = $k;
+        $msg = [];
+        $s = [
+            "health" => "unknown",
+            "message" => []
+        ];
+
+
+        if (!$this->is_uuidv4($d["uuid"])) {
+            $s["health"] = "degraded";
+            $msg[] = "Device key `{$d["uuid"]}` is not a UUIDv4.";
         }
-        return $filtered;
-    }
 
-
-    public function dgsStatus($dg = null) {
-        $whereClause = '';
-        if ($dg !== null) { $whereClause = 'WHERE dgUuid = ?'; }
-        $query = "SELECT * FROM v_stor_status {$whereClause}";
-        if ($dg !== null) { $params = [$dg]; }
-        else { $params = []; }
-        $res = $this->mysqli->execute_query($query, $params);
-        return $res->fetch_all(MYSQLI_ASSOC);
-    }
-
-    function status() {
-        $dgs = [];
-        $res = [];
-
-        foreach ($this->settings['stor']['devices'] as $k => $d) {
-            if ( array_key_exists('dg', $d) ) {
-                if (!is_null($d['dg'])) {
-                    $dgs[$d['dg']]['devices'] = isset($dgs[$d['dg']]['devices']) ? ($dgs[$d['dg']]['devices'] + 1) : 1;
-                }
-            }
-            // the glued-lib default config comes with predefined uuids for the $datapath and for tmp
-            if ( $k == '09e0ef57-86e6-4376-b466-a7d2af31474e' ) { $d['path'] = $this->settings['glued']['datapath'] . '/' . basename(__ROOT__)  . '/data'; }
-            if ( $k == '86159ff5-f513-4852-bb3a-7f4657a35301' ) { $d['path'] = sys_get_temp_dir(); }
-            $d['status']['health'] = 'unknown';
-            $d['status']['message'] = 'device status retrieval unsupported';
-            if ( $d['adapter'] == 'filesystem' and PHP_OS == 'Linux') {
-                if (is_dir($d['path'] ?? '')) {
-                    $output = json_decode(shell_exec('findmnt -DJv --output fstype,source,target,fsroot,options,size,used,avail,use%,uuid,partuuid --target ' . $d['path']));
-                    $d['status'] = (array) $output->filesystems[0];
-                    if (is_writable($d['path'])) {
-                        $d['status']['health'] = 'online';
-                        $d['status']['message'] = 'ok';
-                    } else {
-                        $d['status']['health'] = 'degraded';
-                        $d['status']['message'] = 'path `'.$d['path'].'` is not writable';
-                    }
+        if ( $d["adapter"] == "filesystem" and PHP_OS == "Linux") {
+            if (is_dir($d["uri"] ?? "")) {
+                $output = json_decode(shell_exec("findmnt -DJv --output fstype,source,target,fsroot,options,size,used,avail,use%,uuid,partuuid --target " . $d["path"]));
+                $s["adapter"] = (array) $output->filesystems[0];
+                if (is_writable($d["uri"])) {
+                    $s["health"] = "online";
+                    $msg[] = "ok";
                 } else {
-                    $d['status']['health'] = 'offline';
-                    $d['status']['message'] = '`'.$d['path'].'` is not a directory or is missing.';
+                    $s["health"] = "degraded";
+                    $msg[] = "path `{$d["path"]}` is not writable";
+                }
+            } else {
+                $d["health"] = "offline";
+                $msg[] = "`{$d["path"]}` is not a directory or is missing";
+            }
+        }
+
+        $s['message'] = implode('; ', $msg);
+        if ($s["health"] != "online") { $this->notify->send("Storage device `{$d["uuid"]}` `{$s["health"]}`: {$s["message"]}", notify_admins: true); }
+        return $s;
+    }
+
+    function findDeviceDgs($data, $uuid)
+    {
+        $res = [];
+        foreach ($data as $item) {
+
+            foreach (($item['devices'] ?? []) as $k => $device) {
+                if ($device['uuid'] === $uuid) {
+                    $subres = $item['devices'][$k];
+                    $subres['uuid'] = $item['uuid'];
+                    $res[] = $subres;
+
+                    break; // Stop searching for this device once found
                 }
             }
-            if (!$this->is_uuidv4($k)) {
-                $d['status']['health'] = 'degraded';
-                $d['status']['message'] = 'device key `'.$k.'` is not a UUIDv4';
-            }
-            if (!$this->is_uuidv4($d['dg'] ?? 'a4590c69-f4ac-4fa5-8a2f-03b3f65923ce')) {
-                $d['status']['health'] = 'degraded';
-                $d['status']['message'] = 'dg key `' . ($d['dg'] ?? 'a4590c69-f4ac-4fa5-8a2f-03b3f65923ce') .'` is not a UUIDv4';
-            }
-            $res['devices'][$k] = $d;
-            if ($d['status']['health'] != "online") { $this->notify->send('Storage device ' . $k . ' '.$d['status']['health']. ': '. $d['status']['message'], notify_admins: true);}
-        }
-        $res['dgs'] = array_merge_recursive($this->settings['stor']['dgs'],$dgs);
-
-        $q1 = "INSERT INTO `t_stor_dgs` (`uuid`, `data`) VALUES (uuid_to_bin(?, true), ?) ON DUPLICATE KEY UPDATE `data` = VALUES(`data`)";
-        $q2 = "INSERT IGNORE INTO `t_stor_configlog` (`uuid`, `data`) VALUES (uuid_to_bin(?, true), ?)";
-        $q3 = "INSERT INTO `t_stor_devices` (`uuid`, `data`) VALUES (uuid_to_bin(?, true), ?) ON DUPLICATE KEY UPDATE `data` = VALUES(`data`)";
-        $q4 = "INSERT IGNORE INTO `t_stor_configlog` (`uuid`, `data`) VALUES (uuid_to_bin(?, true), ?)";
-        $q5 = "INSERT INTO `t_stor_statuslog` (`uuidDev`, `data`) VALUES (uuid_to_bin(?, true), ?) ON DUPLICATE KEY UPDATE `tsUpdated` = CURRENT_TIMESTAMP(1);";
-        $q5 = "
-            INSERT INTO `t_stor_statuslog` (`uuidDev`, `data`) VALUES (uuid_to_bin(?, true), ?) ON DUPLICATE KEY UPDATE `tsUpdated` = CURRENT_TIMESTAMP(1);
-            ";
-
-         foreach ($res['dgs'] as $k => $v) {
-             $v = json_encode($v ?? [], JSON_FORCE_OBJECT);
-             $data = [ $k, $v ];
-             $this->mysqli->begin_transaction();
-             $this->mysqli->execute_query($q1, $data);
-             $this->mysqli->execute_query($q2, $data);
-             $this->mysqli->commit();
-        }
-        foreach ($res['devices'] as $k => $v) {
-            $v['status']['dg'] = $v['dg'];
-            $s = json_encode($v['status'] ?? [], JSON_FORCE_OBJECT);
-            unset($v['status']);
-            $v = json_encode($v ?? [], JSON_FORCE_OBJECT);
-            $data = [ $k, $v ];
-            $this->mysqli->begin_transaction();
-            $this->mysqli->execute_query($q3, $data);
-            $this->mysqli->execute_query($q4, $data);
-            $this->mysqli->execute_query($q5, [ $k, $s ]);
-            $this->mysqli->commit();
         }
         return $res;
     }
 
 
+    public function devices($uuid = null, $log = true) {
+        $res = $this->settings["stor"]["devices"];
+        $dgs = $this->dgs();
+        $key = "09e0ef57-86e6-4376-b466-a7d2af31474e";
+        if (array_key_exists($key, $res)) { $res[$key]["path"] = $this->settings["glued"]["datapath"] . "/" . basename(__ROOT__)  . "/data"; }
+        $key = "86159ff5-f513-4852-bb3a-7f4657a35301";
+        if (array_key_exists($key, $res)) { $res[$key]["path"] = sys_get_temp_dir(); }
+        if ($uuid) {
+            if (array_key_exists($uuid,$res)) {
+                $res = array_intersect_key($res, [$uuid => null]); // return $res containing the only key, $uuid
+            }
+            else return [];
+        }
+        foreach ($res as $k=>&$v) {
+            $v["uuid"] = $k;
+            $v["status"] = $this->device_status($v);
+            $v["status"]["dgs"] = $this->findDeviceDgs($dgs, $k);
+        }
 
-    /**
-     * Returns a health status response.
-     * @param  Request  $request  
-     * @param  Response $response 
-     * @param  array    $args     
-     * @return Response Json result set.
-     */
-    public function health(Request $request, Response $response, array $args = []): Response {
-        $params = $request->getQueryParams();
-        $data = [
-                'timestamp' => microtime(),
-                'status' => 'OK',
-                'params' => $params,
-                'service' => basename(__ROOT__),
-            ];
-        $status = $this->status();
-        $status['os'] = PHP_OS;
-        $status['dgh-def'] = $this->dg_handle();
-        $status['dgh-usr'] = $this->dg_handle('1c8964ab-b60e-4407-bc06-309faabd4db8');
-        $status['dev-def'] = $this->dev_handle();
-        $status['dev-def2'] = $this->dev_handle([ 'enabled' => true ],'default');
-        $data[basename(__ROOT__)] = $status;
-        return $response->withJson($data);
+        if ($log == 1) {
+            $q1 = "INSERT INTO `t_stor_devices` (`uuid`, `data`) VALUES (uuid_to_bin(?, true), ?) ON DUPLICATE KEY UPDATE `data` = VALUES(`data`)";
+            $q2 = "INSERT IGNORE INTO `t_stor_configlog` (`uuid`, `data`) VALUES (uuid_to_bin(?, true), ?) ON DUPLICATE KEY UPDATE `ts_logged` = CURRENT_TIMESTAMP(1)";
+            $q3 = "INSERT INTO `t_stor_statuslog` (`uuid_dev`, `data`, `uuid_dg`, `role`, `prio`) VALUES (uuid_to_bin(?, true), ?, uuid_to_bin(?, true), ?, ?) ON DUPLICATE KEY UPDATE `ts_updated` = CURRENT_TIMESTAMP(1);";
+            $s1 = $this->mysqli->prepare($q1);
+            $s2 = $this->mysqli->prepare($q2);
+            $s3 = $this->mysqli->prepare($q3);
+
+            foreach ($res as $k => $vv) {
+                $s = $vv['status'] ?? [];
+                unset($vv['status']);
+                $vv = json_encode($vv ?? []);
+                $this->mysqli->begin_transaction();
+                $s1->bind_param("ss", $k, $vv);
+                $s1->execute();
+                $s2->bind_param("ss", $k, $vv);
+                $s2->execute();
+                foreach ($s["dgs"] as $dg) {
+                    $ss = json_encode($s);
+                    $s3->bind_param("ssssd", $k, $ss, $dg['uuid'],$dg['role'],$dg['prio']);
+                    $s3->execute();
+                }
+                $this->mysqli->commit();
+            }
+        }
+        $res = array_values($res);
+        if (!is_null($uuid)) { return $res[0]; }
+        return $res;
     }
 
-    public function healthDgs(Request $request, Response $response, array $args = []): Response {
-        $r = $this->dgsStatus($args['uuid'] ?? null);
-        $data = [
-            'timestamp' => microtime(),
-            'status' => 'OK',
-            'service' => basename(__ROOT__),
-            'data' => $r ?? []
-        ];
-        $status = $this->status();
-        return $response->withJson($data);
+
+    public function devices_r1(Request $request, Response $response, array $args = []): Response {
+        $res = $this->devices($args['id'] ?? null);
+        if ($res == []) { return $response->withJson(['message' => "Not found."])->withStatus(404); }
+        return $response->withJson(['data' => $res]);
+
     }
 
-    /**
-     * List available drives
-     * @param  Request  $request
-     * @param  Response $response
-     * @param  array    $args
-     * @return Response Json result set.
-     */
-    public function buckets_r1(Request $request, Response $response, array $args = []): Response {
-        $params = $request->getQueryParams();
+    /// ///////////////////////////////////////////////////////////////////////////////
+    /// DGS
+    /// ///////////////////////////////////////////////////////////////////////////////
+
+
+    function get_dg_uuid($uuid) {
+        //if ($uuid == 'default') { $uuid = $this->get_default_dg(); }
+        if (array_key_exists($uuid, $this->settings['stor']['dgs'])) { return $uuid; }
+        throw new Exception("Dg `{$uuid}` used as device parent but not configured.", 500);
+        // TODO replace with notification
+    }
+
+    public function dgs($uuid = null, $log = true)
+    {
+        $dgs = $this->settings['stor']['dgs'] ?? [];
+        foreach ($dgs as $key => &$item) {
+            $item['uuid'] = $key;
+            if (!array_key_exists('devices', $item)) { $item['devices'] = []; }
+
+            // Process each "device" and validate "uuid"
+            foreach ($item['devices'] as $k => &$device) {
+                    if (isset($device['uuid'])) {
+                        $device['prio'] = isset($device['prio']) ? $device['prio'] : 1000;
+                        if (!$this->is_uuidv4($device['uuid'])) {
+                            // Handle case where "uuid" is not set or is not a valid UUIDv4 (remove entry)
+                            $item['status']['message'][] = "Device UUID {$device['uuid']} is not a valid UUID string.";
+                            unset($item['devices'][$k]);
+                            if (!array_key_exists($device['uuid'], $this->settings['stor']['devices'])) {
+                                $item['status']['message'][] = "Device {$device['uuid']} undefined.";
+                                unset($item['devices'][$k]);
+                            }
+                        }
+                    } else {
+                        $item['status']['message'][] = "Dg contains a device item without the mandatory uuid.";
+                    }
+            }
+
+            // Remove any null values caused by invalid devices
+            $item['devices'] = array_values(array_filter($item['devices']));
+            $item['status']['members'] = count($item['devices']);
+
+            // Sort devices by "prio"
+            if ($item['status']['members'] > 0) {
+                usort($item['devices'], function ($a, $b) {
+                    return $a['prio'] - $b['prio'];
+                });
+            } else {
+                $item['status']['message'][] = "Dg doesn't have any devices configured.";
+            }
+        }
+
+
+
+        if ($log == true) {
+            $q1 = "INSERT INTO `t_stor_dgs` (`uuid`, `data`) VALUES (uuid_to_bin(?, true), ?) ON DUPLICATE KEY UPDATE `data` = VALUES(`data`)";
+            $q2 = "INSERT IGNORE INTO `t_stor_configlog` (`uuid`, `data`) VALUES (uuid_to_bin(?, true), ?)";
+            foreach ($dgs as $k => &$v) {
+                $vv = $v;
+                unset($vv['status']);
+                $data = [$k, json_encode($vv ?? [])];
+                $this->mysqli->begin_transaction();
+                $this->mysqli->execute_query($q1, $data);
+                if ($this->mysqli->affected_rows > 0) { $v['log'] = "New dg `{$k}` configured."; }
+                $this->mysqli->execute_query($q2, $data);
+                if ($this->mysqli->affected_rows > 0) { $v['log'] = "Dg `{$k}` configuration updated."; }
+                $this->mysqli->commit();
+            }
+        }
+
+        $res = array_values($dgs);
+        if (!is_null($uuid)) { return $res[0]; }
+        return $res;
+    }
+
+    public function dgs_r1(Request $request, Response $response, array $args = []): Response {
+        $res = $this->dgs($args['id'] ?? null);
+        if ($res == []) { return $response->withJson(['message' => "Not found."])->withStatus(404); }
+        return $response->withJson(['data' => $res]);
+    }
+
+    /// ///////////////////////////////////////////////////////////////////////////////
+    /// BUCKETS
+    /// ///////////////////////////////////////////////////////////////////////////////
+
+
+    public function get_buckets($bucket = null): array
+    {
+        $where = '';
+        if (!is_null($bucket)) {
+            $where = 'WHERE bucket = uuid_to_bin(?, true)';
+            $arg = [ $bucket ];
+        }
+
         $q = "
         SELECT 
-          bin_to_uuid(b.`uuid`, 1) AS `b.uuid`,
-          b.name AS `b.name`,
-          b.data AS `b.data`,
+          bin_to_uuid(b.`uuid`, 1) AS `bucket`,
+          b.name AS `name`,
           bin_to_uuid(bd.`dg`, 1) AS `dg`,
-          s.dgStatus
+          s.dg_health,
+          s.dev_uuid,
+          s.dev_health,
+          s.dev_prio,
+          s.dev_role,
+          s.dev_adapter,
+          s.status_ts as ts
         FROM `t_stor_buckets` b
         LEFT JOIN t_stor_bucket_dgs bd ON bd.bucket = b.uuid
         LEFT JOIN (
-          SELECT DISTINCT dgUuid, dgStatus
+          SELECT dg_uuid, dg_health, dev_uuid, dev_health, status_ts, dev_prio, dev_role, dev_adapter
           FROM v_stor_status
-        ) s ON s.dgUuid = bin_to_uuid(bd.dg, 1)
+        ) s ON s.dg_uuid = bin_to_uuid(bd.dg, 1)
+        {$where}
+        ORDER BY 
+          bucket,
+          CASE WHEN s.dev_health = 'online' THEN 0 ELSE 1 END,
+          dev_prio
         ";
 
-        $res = $this->mysqli->execute_query($q, []);
+        $res = $this->mysqli->execute_query($q, $arg ?? []);
         $data = $res->fetch_all(MYSQLI_ASSOC);
+        $unflat = [];
 
+
+        foreach ($data as $row) {
+            // Check if the bucket already exists in the unflattened result
+            if (!isset($unflat[$row['bucket']])) {
+                // If not, create a new entry for the bucket
+                $unflat[$row['bucket']] = [
+                    'uuid' => $row['bucket'],
+                    'name' => $row['name'],
+                    'ts' => $row['ts'],
+                    'dgs' => [],
+                    'devices' => [],
+                ];
+            }
+
+            // Check if the dg already exists in the dgs array
+            $dgExists = false;
+            foreach ($unflat[$row['bucket']]['dgs'] as &$dgArray) {
+                if ($dgArray['uuid'] === $row['dg']) {
+                    $dgExists = true;
+                    break;
+                }
+            }
+            // If the dg does not exist, create a new entry for dg
+            if (!$dgExists) {
+                $unflat[$row['bucket']]['dgs'][] = [
+                    'uuid' => $row['dg'],
+                    'health' => $row['dg_health'],
+                ];
+            }
+
+            // Check if the dg already exists in the dgs array
+            $devExists = false;
+            foreach ($unflat[$row['bucket']]['devices'] as &$devArray) {
+                if ($devArray['uuid'] === $row['dev_uuid']) {
+                    $devExists = true;
+                    break;
+                }
+            }
+
+            // If the dg does not exist, create a new entry for dg
+            if (!$devExists) {
+                $unflat[$row['bucket']]['devices'][] = [
+                    'uuid' => $row['dev_uuid'],
+                    'health' => $row['dev_health'],
+                    'role' => $row['dev_role'],
+                    'prio' => $row['dev_prio'],
+                    'adapter' => $row['dev_adapter'],
+                ];
+            }
+        }
+        $res = array_values($unflat);
+        if (!is_null($bucket)) {
+            $res = $res[0];
+        }
+        return $res;
+    }
+    public function buckets_r1(Request $request, Response $response, array $args = []): Response {
+        $params = $request->getQueryParams();
+        $unflat = $this->get_buckets($args['id'] ?? null);
         $data = [
-                'timestamp' => microtime(),
-                'status' => 'Buckets r1 OK',
-                'data' => $data,
-                'service' => basename(__ROOT__),
-            ];
+            'timestamp' => microtime(),
+            'status' => 'Buckets r1 OK',
+            'data' => $unflat,
+            'service' => basename(__ROOT__),
+        ];
         return $response->withJson($data);
     }
 
@@ -279,12 +393,12 @@ class ServiceController extends AbstractController
         $this->status();
         // TODO replace with propper validation
         $contentTypeHeader = $request->getHeaderLine('Content-Type') ?? '';
-        if ($contentTypeHeader !== 'application/json') { throw new \Exception('Invalid Content-Type. Please set `Content-Type: application/json', 400); }
+        if ($contentTypeHeader !== 'application/json') { throw new Exception('Invalid Content-Type. Please set `Content-Type: application/json', 400); }
         $body = $request->getParsedBody();
-        $uuid = \Ramsey\Uuid\Uuid::uuid4()->toString();
-        if (!isset($body['name'])) { throw new \Exception('Mandatory $.name not provided.'); }
-        if (!isset($body['dgs'])) { throw new \Exception('Mandatory $.dgs not provided.'); }
-        if (!is_array($body['dgs'])) { throw new \Exception('Mandatory $.dgs is not a list (array).'); }
+        $uuid = Uuid::uuid4()->toString();
+        if (!isset($body['name'])) { throw new Exception('Mandatory $.name not provided.'); }
+        if (!isset($body['dgs'])) { throw new Exception('Mandatory $.dgs not provided.'); }
+        if (!is_array($body['dgs'])) { throw new Exception('Mandatory $.dgs is not a list (array).'); }
 
         $q1 = "INSERT INTO `t_stor_buckets` (`uuid`, `data`) VALUES (uuid_to_bin(?,true), ?)";
         $q2 = "INSERT INTO `t_stor_bucket_dgs` (`bucket`,`dg`) VALUES (uuid_to_bin(?,true), uuid_to_bin(?,true))";
@@ -292,13 +406,11 @@ class ServiceController extends AbstractController
         try {
             $this->mysqli->begin_transaction();
             $this->mysqli->execute_query($q1, [ $uuid, json_encode($body) ]);
-            foreach ($body['dgs'] as $dg) {
-                $this->mysqli->execute_query($q2, [$uuid, $dg]);
-            }
+            foreach ($body['dgs'] as $dg) { $this->mysqli->execute_query($q2, [$uuid, $dg]); }
             $this->mysqli->commit();
-        } catch (\mysqli_sql_exception $e) {
-            if ($e->getCode() === 1452) { throw new \Exception("Unknown devicegroup UUID.", 400); }
-            elseif ($e->getCode() === 1062) { throw new \Exception("The bucket:devicegroup association already exists.", 400);
+        } catch (mysqli_sql_exception $e) {
+            if ($e->getCode() === 1452) { throw new Exception("Unknown devicegroup UUID.", 400); }
+            elseif ($e->getCode() === 1062) { throw new Exception("The bucket:devicegroup association already exists.", 400);
             } else { throw $e; }
         }
 
@@ -311,6 +423,10 @@ class ServiceController extends AbstractController
         return $response->withJson($data);
     }
 
+    /// ///////////////////////////////////////////////////////////////////////////////
+    /// OBJECTS (data objects) FILES (links)
+    /// ///////////////////////////////////////////////////////////////////////////////
+
     /**
      * Gets all files in a space
      * @param  Request  $request
@@ -318,22 +434,77 @@ class ServiceController extends AbstractController
      * @param  array    $args
      * @return Response Json result set.
      */
-    public function files_r1(Request $request, Response $response, array $args = []): Response {
+
+    private function get_hardlink($file, $bucket = ''): array
+    {
+        $stat = stat($file);
+        if ($stat !== false) {
+            $linkCount = $stat[11];
+            if ($linkCount > 1) {
+                $command = "find /var/www/html/data/glued-stor/data/buckets/{$bucket} -inum {$stat['ino']} 2>/dev/null";
+                $hardlinks = [];
+                exec($command, $hardlinks);
+            }
+        }
+        return ($hardlinks ?? []);
+    }
+
+
+    public function objects_r1(Request $request, Response $response, array $args = []): Response {
         $params = $request->getQueryParams();
+        $file = '/var/www/html/data/glued-stor/data/hashes/7/5/1/2/7512b4c69ad0d6c38da365fcb41c0f2b9642c34f2e92183b122c1955e0aeb077fb3caa0678d9597a4b069e178fd990db5048851906fed06fdf82f4eb37a4dded';
+        $h = $this->get_hardlink($file);
         $data = [
-                'timestamp' => microtime(),
-                'status' => 'Files r1 OK',
-                'params' => $params,
-                'service' => basename(__ROOT__),
-            ];
+            'timestamp' => microtime(),
+            'status' => 'Objects R1 OK',
+            'params' => $params,
+            'service' => basename(__ROOT__),
+            'data' => $h
+        ];
         return $response->withJson($data);
     }
 
-    function getObjectMeta($file):array {
+    public function links_r1(Request $request, Response $response, array $args = []): Response {
+        $data = [
+            'timestamp' => microtime(),
+            'status' => 'ok',
+            'service' => basename(__ROOT__)
+        ];
+        $params = $request->getQueryParams();
+        if (!array_key_exists('token', $args)) { throw new Exception('Token not defined.', 400); }
+        if (!array_key_exists('nonce', $args)) { throw new Exception('Nonce not defined.', 400); }
+        if (!array_key_exists('exp', $args)) { throw new Exception('Expiry not defined.', 400); }
+        $res = $this->decodeRetrievalKey("{$args['token']}/{$args['nonce']}/{$args['exp']}");
+        if (is_null($res)) { $data['status'] = 'Not found'; return $response->withJson($data)->withStatus(404); }
+
+        $tree = $this->name_to_path($res['obj']);
+        $file = "/var/www/html/data/glued-stor/data/buckets/{$res['bkt']}/$tree/{$res['obj']}";
+        $mime = mime_content_type($file);
+        if (file_exists($file)) {
+            $response = $response
+                ->withHeader('Content-Type', $mime)
+                ->withHeader('Content-Disposition', "attachment;filename=\"{$res['obj']}.{$mime}\"")
+                ->withHeader('Content-Length', filesize($file));
+            readfile($file);
+            return $response;
+        } else { $data['status'] = 'Not found'; return $response->withJson($data)->withStatus(404); }
+    }
+
+
+    function name_to_path($name, $length = 4): string
+    {
+        if (strlen($name) >= $length) {
+            return implode('/', str_split(substr($name, 0, $length)));
+        } else {
+            throw new \Exception("Filename is too short.");
+        }
+    }
+
+    function object_meta($file): array {
         $path = $file->getStream()->getMetadata('uri');
         $mime = mime_content_type($path) ?? $file->getClientMediaType() ?? null;
         $data = [
-            'uuid' => \Ramsey\Uuid\Uuid::uuid4()->toString(),
+            'uuid' => Uuid::uuid4()->toString(),
             'name' => $file->getClientFilename(),
             'size' => $file->getSize(),
             'hash' => [
@@ -343,21 +514,132 @@ class ServiceController extends AbstractController
             'mime' => [
                 'type' => $mime,
                 'ext' => $mime && array_key_exists($mime, $this->utils->mime2ext) ? $this->utils->mime2ext[$mime][0] : ($file->getClientFilename() ? pathinfo($file->getClientFilename(), PATHINFO_EXTENSION) : null),
-            ]
+            ],
         ];
         return $data;
     }
 
-    // TODO t_core_tokens now has only a c_inherit column. we'll need a c_owner column too, because user tokens will use c_inherit, but svc tokens will have c_owner (the one whom is the token management associated to)
-    public function files_w1(Request $request, Response $response, array $args = []): Response {
+    function generateRetrievalUri($object, $bucket, $ttl = 3600): string {
+        $base = $this->settings['glued']['protocol'].$this->settings['glued']['hostname'].$this->settings['routes']['be_stor_links_v1']['path'] . '/';
+        $data = $base . $this->generateRetrievalKey($bucket, $object, 3600);
+        return $data;
+    }
 
+
+    public function generateRetrievalKey($bkt, $obj, $ttl = 3600): string
+    {
+        $iat = time();
+        $exp = (string) ($iat + $ttl);
+        $nonce   = random_bytes(SODIUM_CRYPTO_SECRETBOX_NONCEBYTES - strlen($exp) - 1);
+        $key     = sodium_crypto_generichash($this->pkey . $exp, '', SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
+        $payload = sodium_crypto_secretbox("$bkt/$obj/$ttl/$exp", $nonce  . '/' . $exp, $key);
+        $token   = sodium_bin2base64($payload, SODIUM_BASE64_VARIANT_URLSAFE)  . '/' . sodium_bin2base64($nonce, SODIUM_BASE64_VARIANT_URLSAFE)  . '/' . $exp;
+        return $token;
+    }
+
+    public function decodeRetrievalKey(string $token): ?array
+    {
+        // Split the token into payload, nonce, and expiration parts
+        // Handle invalid tokens (all necessary token parts must be present)
+        $tokenParts = explode('/', $token);
+        if (count($tokenParts) !== 3) { return null; }
+        list($payload, $nonce, $exp) = $tokenParts;
+
+        // Decode the payload and nonce from base64
+        // Handle tampered nonce/expiry, calculate the private key
+        // Handle the case where decryption fails
+        $payload = sodium_base642bin($payload, SODIUM_BASE64_VARIANT_URLSAFE);
+        $nonce = sodium_base642bin($nonce, SODIUM_BASE64_VARIANT_URLSAFE);
+        if (strlen("{$nonce}/{$exp}") !== SODIUM_CRYPTO_SECRETBOX_NONCEBYTES) { return null; }
+        $key = sodium_crypto_generichash($this->pkey . $exp, '', SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
+
+        // Decrypt the payload using the nonce, key, and additional data
+        // Handle the case where decryption fails
+        $decrypted = sodium_crypto_secretbox_open($payload, $nonce . '/' . $exp, $key);
+        if ($decrypted === false) { return null; }
+        list($bkt, $obj, $ttl, $exp) = explode('/', $decrypted);
+        return [
+            'bkt' => $bkt,
+            'obj' => $obj,
+            'iat' => (int) ($exp - $ttl),
+            'exp' => (int) $exp,
+        ];
+    }
+
+
+    private function write_object($file, $bucket): array {
+
+        // Filter writable devices (for now, only filesystem devices are allowed)
+        foreach ($bucket['devices'] as &$dev) { $dev['path'] = $this->devices($dev['uuid'])['path']; }
+        $localDevices = array_filter($bucket['devices'], function ($device) {
+            return isset($device["path"]) && is_string($device["path"]) &&
+                $device["health"] == "online" && $device["role"] == "storage" && $device["adapter"] == "filesystem";
+        });
+        if (count($localDevices) == 0) { throw new \Exception('No local writable devices available/online'); }
+        $device = $localDevices[0];
+
+        // Get uploaded file metadata
+        $object = $this->object_meta($file);
+
+        // File storing logic
+        if ($device['adapter'] === 'filesystem') {
+
+            // Ensure $file identified with hash($file) exists
+            $hashDir  = "{$device['path']}/hashes/{$this->name_to_path($object['hash']['sha3-512'])}";
+            $hashFile = "{$hashDir}/{$object['hash']['sha3-512']}";
+            if (!file_exists($hashFile)) {
+                if (!is_dir($hashDir)) { mkdir($hashDir, 0777, true); }
+                $file->moveTo($hashFile);
+            }
+
+            // Ensure hashFile is hardlinked as objectFile. If objectFile already exists, do not use the generated objectUUID
+            $objFile = $this->get_hardlink($hashFile, $bucket['uuid'])[0] ?? null;
+            if (!is_null($objFile)) { $object['uuid'] = basename($objFile); }
+            else {
+                $objDir  = "{$device['path']}/buckets/{$bucket['uuid']}/{$this->name_to_path($object['uuid'])}";
+                $objFile = "{$objDir}/{$object['uuid']}";
+                if (!is_dir($objDir)) { mkdir($objDir, 0777, true); }
+                link($hashFile, $objFile);
+            }
+            $object['link'] = $this->generateRetrievalUri($object['uuid'], $bucket['uuid']);
+        } else { throw new \Exception('No suitable local device found'); }
+
+        $q1 = "
+        INSERT INTO `t_stor_objects_replicas` 
+            (`object`, `device`, `balanced`, `consistent`) VALUES (uuid_to_bin(?, 1), uuid_to_bin(?, 1), ?, ?)
+        ON DUPLICATE KEY UPDATE `balanced` = ?, `consistent` = ?;
+        ";
+
+        $this->mysqli->begin_transaction();
+        $s1 = $this->mysqli->prepare($q1);
+        //$s2 = $this->mysqli->prepare($q2);
+        //$s3 = $this->mysqli->prepare($q3);
+        $o = $object['uuid'];
+        $d = $device['uuid'];
+        $v = 1;
+        $s1->bind_param("ssiiii", $o, $d, $v, $v, $v, $v);
+        $s1->execute();
+        $this->mysqli->commit();
+        return $object;
+    }
+
+
+    // TODO t_core_tokens now has only a c_inherit column. we'll need a c_owner column too, because user tokens will use c_inherit, but svc tokens will have c_owner (the one whom is the token management associated to)
+    public function objects_c1(Request $request, Response $response, array $args = []): Response {
+
+        // initial sanity checks
+        if (!array_key_exists('bucket', $args)) { throw new Exception('Bucket not defined.', 500); }
         if (isset($_SERVER['CONTENT_LENGTH']) && (int) $_SERVER['CONTENT_LENGTH'] > $this->convert_units(ini_get('post_max_size'))) {
-            throw new \Exception(
+            throw new Exception(
                 'Upload size in bytes exceeds allowed limit ('.$_SERVER['CONTENT_LENGTH'].' > '.$this->convert_units(ini_get('post_max_size')).').',
                 400);
         }
 
-        $data         = [];
+
+        $bucket = $this->get_buckets($args['bucket']);
+        $data['bucket'] = $bucket;
+
+        //return $response->withJson($data);
         $files        = $request->getUploadedFiles();
         $parsedBody   = $request->getParsedBody();
         $hdrUser      = $request->getHeader('X-glued-auth-uuid')[0] ?? null;
@@ -368,67 +650,23 @@ class ServiceController extends AbstractController
         $headerValueArray = $request->getHeader('Accept');
         $headerValueString = $request->getHeaderLine('Accept');
 
-        //print_r($headers);
-        //print_r($serverParams);
-        //print_r($request->getHeader('X-glued-auth-uuid'));
-        $hdrUser = $request->getHeader('X-glued-auth-uuid')[0] ?? null;
-        $hdrAuth = $request->getHeader('Authorization')[0] ?? null;
-
-//die();
 
         if (!empty($files)) {
-            $target_dir = array_values($this->dev_handle())[0]['path'];
 
             // flatten $files array to unify handling of file1=,file2=,file[]
             foreach ($files as $k => $f) {
-                if (is_array($f)) {
-                    foreach ($f as $kk=>$ff) { $flattened[$k.'+'.$kk] = $ff; }
-                } else {
-                    $flattened[$k] = $f;
-                }
+                if (is_array($f)) { foreach ($f as $kk=>$ff) { $flattened[$k.'+'.$kk] = $ff; } }
+                else { $flattened[$k] = $f; }
             }
 
-            $linksMeta = json_decode(($parsedBody['links'] ?? []), true);
             foreach ($flattened as $file) {
                 if ($file->getError() === UPLOAD_ERR_OK) {
-                    $target_file = $target_dir . $file->getClientFilename();
-                    $object = $this->getObjectMeta($file);
-                    $link = $linksMeta[$file->getClientFilename()] ?? [];
-                    if (!isset($link['name'])) { $link['name'] = $file->getClientFilename() ?? 'file'; }
-                    $data[] = [
-                        'object' => $object,
-                        'link' => $link
-                    ];
+                    $data['files'][] = $this->write_object($file, $bucket);
 
                     /*
                     //print_r($data); echo "DIEING"; die();
                     //$f['meta'] = json_decode($parsedBody['stor'] ?? [],true)[$file->getClientFilename()] ?? [];
 
-
-                    // Check if file already exists
-                    if (!file_exists($target_file)) {
-                        // Move the uploaded file to the target directory
-                        $file->moveTo($target_file);
-
-                        // Add file information to response array
-                        $data[] = array(
-                            'name' => $file->getClientFilename(),
-                            'size' => $file->getSize(),
-                            'type' => $file->getClientMediaType(),
-                            'hash' => hash_file('sha3-512', $target_file),
-                            'url' => 'http://' . $request->getUri()->getHost() . '/' . $target_file,
-                            'status' => 'success'
-                        );
-
-                    } else {
-
-                        // Add error message to response array
-                        $data[] = array(
-                            'name' => $file->getClientFilename(),
-                            'error' => 'File already exists.',
-                            'status' => 'error'
-                        );
-                    }
 */
                 } else {
                     // Add error message to response array
@@ -460,45 +698,47 @@ class ServiceController extends AbstractController
         return $response->withJson($data);
     }
 
-    public function annotations_r1(Request $request, Response $response, array $args = []): Response {
-        $headers = '';
-        foreach ($request->getHeaders() as $name => $values) {
-            $headers .= $name . ": " . implode(", ", $values);
-        }
-        $r = [
-            'qp' => $request->getQueryParams(),
-            'pb' => $request->getParsedBody(),
-            'fi' => $request->getUploadedFiles(),
-            'hd' => $headers
-        ];
-        return $response->withJson($r);
+
+
+    /// ///////////////////////////////////////////////////////////////////////////////
+    /// HEALTH
+    /// ///////////////////////////////////////////////////////////////////////////////
+
+    function status() {
+        $res = [];
+        $res['devices'] = $this->devices(log: 1);
+        $res['dgs'] = $this->dgs();
+        return $res;
     }
 
-    public function annotations_w1(Request $request, Response $response, array $args = []): Response {
-        $headers = '';
-        foreach ($request->getHeaders() as $name => $values) {
-            $headers .= $name . ": " . implode(", ", $values);
-        }
-        $r = [
-            'qp' => $request->getQueryParams(),
-            'pb' => $request->getParsedBody(),
-            'fi' => $request->getUploadedFiles(),
-            'hd' => $headers
-        ];
-        return $response->withJson($r);
+
+    /**
+     * Returns a health status response.
+     * @param  Request  $request  
+     * @param  Response $response 
+     * @param  array    $args     
+     * @return Response Json result set.
+     */
+    public function health(Request $request, Response $response, array $args = []): Response {
+        $params = $request->getQueryParams();
+        $data = [
+                'timestamp' => microtime(),
+                'status' => 'OK',
+                'params' => $params,
+                'service' => basename(__ROOT__),
+            ];
+        $status = $this->status();
+        $status['os'] = PHP_OS;
+        /*
+        $status['dgh-def'] = $this->get_dg_uuid();
+        $status['dgh-usr'] = $this->get_dg_uuid('1c8964ab-b60e-4407-bc06-309faabd4db8');
+        $status['dev-def'] = $this->device_handle();
+        $status['dev-def2'] = $this->device_handle([ 'enabled' => true ],'default');
+        */
+        $data['data'] = $status;
+        return $response->withJson($data);
     }
 
-    public function annotations_d1(Request $request, Response $response, array $args = []): Response {
-        $headers = '';
-        foreach ($request->getHeaders() as $name => $values) {
-            $headers .= $name . ": " . implode(", ", $values);
-        }
-        $r = [
-            'qp' => $request->getQueryParams(),
-            'pb' => $request->getParsedBody(),
-            'fi' => $request->getUploadedFiles(),
-            'hd' => $headers
-        ];
-        return $response->withJson($r);
-    }
+
+
 }

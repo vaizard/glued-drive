@@ -53,7 +53,8 @@
     "keiko/uuid-shortener": "^0.6.1",
     "shuchkin/simplexlsxgen": "^1.2",
     "youthweb/urllinker": "^1.4",
-    "galbar/jsonpath": "^2.1"
+    "galbar/jsonpath": "^2.1",
+    "ext-sodium": "*"
   },
   "suggest": {
     "ext-xdebug": "For dev only"
@@ -100,7 +101,7 @@
       "vendor/vaizard/glued-lib/src/Scripts/php-fpm.sh",
       "Glued\\Lib\\ComposerHooks::generatePHPFPM",
       "vendor/vaizard/glued-lib/src/Scripts/php-fpm-reload.sh",
-      "patch -sR --reject-file=/dev/null -p1 vendor/monolog/monolog/src/Monolog/Logger.php < vendor/vaizard/glued-lib/src/Patches/Logger.patch"
+      "patch -Rs --reject-file=/dev/null -p1 vendor/monolog/monolog/src/Monolog/Logger.php < vendor/vaizard/glued-lib/src/Patches/Logger.patch"
     ],
     "post-install-cmd": [
       "composer configure || echo \"[FAIL] Failed to configure glued. Please make sure all env variables are set. Rerun composer configure.\"",

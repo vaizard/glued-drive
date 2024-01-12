@@ -17,31 +17,51 @@ routes:
     #########################################################
 
     be_stor_health_v1:
-        pattern:    ${routes.be_stor.path}/health/v1
-        path:       ${routes.be_stor.path}/health/v1
+        pattern:    ${routes.be_stor.path}/v1/health
+        path:       ${routes.be_stor.path}/v1/health
         label:      stor health
         dscr:       A healthcheck endpoint for the microservice.
         service:    stor
         methods:
             get:    Glued\Controllers\ServiceController:health
 
-    be_stor_health_dgs_v1:
-        pattern:    ${routes.be_stor.path}/health/dgs/v1[/{uuid}]
-        path:       ${routes.be_stor.path}/health/dgs/v1
-        label:      stor health
-        dscr:       A healthcheck endpoint for the microservice.
-        service:    stor
-        methods:
-            get:    Glued\Controllers\ServiceController:healthDgs
 
 
     #########################################################
     # STOR / BUCKETS                                        #
     #########################################################
 
+    be_stor_devices_v1:
+        pattern:    ${routes.be_stor.path}/v1/devices[/{id}]
+        path:       ${routes.be_stor.path}/v1/devices
+        label:      Storage devices
+        dscr:       Storage devices (physical disks, remote service storage buckets)
+        service:    stor
+        methods:
+            get:    Glued\Controllers\ServiceController:devices_r1
+
+    be_stor_dgs_v1:
+        pattern:    ${routes.be_stor.path}/v1/dgs[/{id}]
+        path:       ${routes.be_stor.path}/v1/dgs
+        label:      Device groups
+        dscr:       Logical groups of storage devices
+        service:    stor
+        methods:
+            get:    Glued\Controllers\ServiceController:dgs_r1
+
+    be_stor_objects_v1:
+        pattern:    ${routes.be_stor.path}/v1/buckets/{bucket}/objects[/{object}[/{link}]]
+        path:       ${routes.be_stor.path}/v1/buckets
+        label:      objects
+        dscr:       Data objects
+        service:    stor
+        methods:
+            get:    Glued\Controllers\ServiceController:objects_r1
+            post:   Glued\Controllers\ServiceController:objects_c1
+
     be_stor_buckets_v1:
-        pattern:    ${routes.be_stor.path}/buckets/v1
-        path:       ${routes.be_stor.path}/buckets/v1
+        pattern:    ${routes.be_stor.path}/v1/buckets[/{id}]
+        path:       ${routes.be_stor.path}/v1/buckets
         label:      Buckets
         dscr:       Isolated data buckets
         service:    stor
@@ -53,15 +73,7 @@ routes:
     # STOR / OBJECTS                                        #
     #########################################################
 
-    be_stor_objects_v1:
-        pattern:    ${routes.be_stor.path}/objects/v1[/{bucket}[/{object}]]
-        path:       ${routes.be_stor.path}/objects/v1
-        label:      objects
-        dscr:       Data objects
-        service:    stor
-        methods:
-            get:    Glued\Controllers\ServiceController:objects_r1
-            post:   Glued\Controllers\ServiceController:objects_c1
+
 
 
     #########################################################
@@ -69,13 +81,10 @@ routes:
     #########################################################
 
     be_stor_links_v1:
-        pattern:    ${routes.be_stor.path}/links/v1[/{bucket}[/{link}]]
-        path:       ${routes.be_stor.path}/links/v1
+        pattern:    ${routes.be_stor.path}/v1/links/{token}/{nonce}/{exp}
+        path:       ${routes.be_stor.path}/v1/links
         label:      links
         dscr:       File links
         service:    stor
         methods:
             get:    Glued\Controllers\ServiceController:links_r1
-            post:   Glued\Controllers\ServiceController:links_c1
-            patch:  Glued\Controllers\ServiceController:links_u1
-            delete: Glued\Controllers\ServiceController:links_d1
