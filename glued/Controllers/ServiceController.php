@@ -8,11 +8,9 @@ use Exception;
 use mysqli_sql_exception;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
-use Glued\Classes\Exceptions\AuthTokenException;
-use Glued\Classes\Exceptions\AuthJwtException;
-use Glued\Classes\Exceptions\AuthOidcException;
-use Glued\Classes\Exceptions\DbException;
-use Glued\Classes\Exceptions\TransformException;
+//use Slim\Psr7\Stream;
+//use Slim\Psr7\Factory\StreamFactory;
+use Nyholm\Psr7\Factory\Psr17Factory;
 use Ramsey\Uuid\Uuid;
 
 class ServiceController extends AbstractController
@@ -514,11 +512,14 @@ class ServiceController extends AbstractController
 
         if (file_exists($file)) {
             $mime = mime_content_type($file);
+            $fileStream = fopen($file, 'rb');
+            $stream = (new Psr17Factory())->createStreamFromResource($fileStream);
+
             $response = $response
                 ->withHeader('Content-Type', $mime)
                 ->withHeader('Content-Disposition', "attachment;filename=\"{$res['obj']}.{$mime}\"")
                 ->withHeader('Content-Length', filesize($file));
-            readfile($file);
+            $response->getBody()->write($stream->getContents());
             return $response;
         } else { $data['status'] = 'Not found'; return $response->withJson($data)->withStatus(404); }
     }
