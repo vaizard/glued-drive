@@ -2,9 +2,47 @@
 
 Stor is a content addressable storage microservice.
 
+## Setup
+
+- Configure stor devices and dgs and the notification system by adding `stor.yaml` and `notify.yaml` to `/var/www/html/data/glued-stor/config`
+- Create first bucket
+
+```shell
+curl 'https://glued/api/stor/v1/buckets' --compressed -X POST -H 'User-Agent: Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0' -H 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8' -H 'Accept-Language: en-US,en;q=0.5' -H 'Accept-Encoding: gzip, deflate, br' -H 'DNT: 1' -H 'Connection: keep-alive' -H 'Upgrade-Insecure-Requests: 1' -H 'Sec-Fetch-Dest: document' -H 'Sec-Fetch-Mode: navigate' -H 'Sec-Fetch-Site: cross-site' -H 'Content-Type: application/json' -H 'Origin: null' -H 'Pragma: no-cache' -H 'Cache-Control: no-cache' --data-raw '{"name": "Industra bucket", "dgs": ["66bf39ed-3913-4985-a775-ef3c87cfaee4"] }'
+```
+
+```shell
+curl -k -X POST https://glued.industra.space/api/stor/v1/buckets/ade1a7f2-3ac4-4e1e-b4bb-96d0f21ada7b/objects     -H 'Authorization: Bearer gtk_35MCHFgkNh1PymQEOLStzMtESdo4DZXykoYWvjX9QcQ='     -H 'Content-Type: multipart/form-data'     -F 'links={ "Ryanair.pdf": { "uuid": "77384ad2-80a4-11ee-9edc-9747c96a1231", "parent": "bd4a3c4a-80a6-11ee-8e34-67217a8a9f66", "app": { "name": "client-name", "instance": "https://glued.example.com", "discover": "/api/client-name/v1/endpoint/someID" }}, "eastern loves_INDUSTRA.png": {}};type=application/json'     -F 'file[]=@/home/killua/Ryanair.pdf'     -F 'file[]=@/home/killua/eastern loves_INDUSTRA.png'     -F 'file[]=@/home/killua/todo-petru'      -F 'field1=fiels2' | jq .
+```
+TODO: token
+
 ## Concepts
 
 ## Using from the command line
+
+```bash
+#new
+curl -k -X POST https://glued/api/stor/v1/buckets/1fcb4d5c-5364-4cf3-b24e-070c4c71f8d2/objects     -H 'Authorization: Bearer gtk_35MCHFgkNh1PymQEOLStzMtESdo4DZXykoYWvjX9QcQ='     -H 'Content-Type: multipart/form-data'     -F 'refs={"Ryanair.pdf":{"refs":{"predecessor":"77384ad2-80a4-11ee-9edc-9747c96a1231","sekatko:vpd":"bd4a3c4a-80a6-11ee-8e34-67217a8a9f66"},"meta":{"sekato":{"ocr":"sometext"},"otherapp":{"whatever":"https://glued.example.com"}}}};type=application/json'     -F 'file[]=@/home/killua/Ryanair.pdf'     -F 'file[]=@/home/killua/eastern loves_INDUSTRA.png'     -F 'file[]=@/home/killua/todo-petru'      -F 'field1=fiels2' | jq .
+
+
+ {
+    "Ryanair.pdf": {
+        "refs": {
+            "predecessor": "77384ad2-80a4-11ee-9edc-9747c96a1231",
+            "sekatko:vpd": "bd4a3c4a-80a6-11ee-8e34-67217a8a9f66"
+        },
+        "meta": {
+            "sekato": {
+                "ocr": "sometext"
+            },
+            "otherapp": {
+                "whatever": "https://glued.example.com"
+            }
+        }
+    }
+}
+
+```
 
 ```bash
 curl -k -X POST https://glued/api/stor/files/v1 \

@@ -318,6 +318,7 @@ class ServiceController extends AbstractController
 
         $res = $this->mysqli->execute_query($q, $arg ?? []);
         $data = $res->fetch_all(MYSQLI_ASSOC);
+        if ($data == []) { return []; }
         $unflat = [];
 
 
@@ -378,11 +379,12 @@ class ServiceController extends AbstractController
     }
     public function buckets_r1(Request $request, Response $response, array $args = []): Response {
         $params = $request->getQueryParams();
-        $unflat = $this->get_buckets($args['id'] ?? null);
+        $b = $this->get_buckets($args['id'] ?? null);
+        if ($b == []) { throw new \Exception("Bucket `{$args['id']}` not found.", 404); }
         $data = [
             'timestamp' => microtime(),
             'status' => 'Buckets r1 OK',
-            'data' => $unflat,
+            'data' => $b,
             'service' => basename(__ROOT__),
         ];
         return $response->withJson($data);
@@ -451,15 +453,44 @@ class ServiceController extends AbstractController
 
 
     public function objects_r1(Request $request, Response $response, array $args = []): Response {
-        $params = $request->getQueryParams();
-        $file = '/var/www/html/data/glued-stor/data/hashes/7/5/1/2/7512b4c69ad0d6c38da365fcb41c0f2b9642c34f2e92183b122c1955e0aeb077fb3caa0678d9597a4b069e178fd990db5048851906fed06fdf82f4eb37a4dded';
-        $h = $this->get_hardlink($file);
+
+        if (!array_key_exists('bucket', $args)) { throw new Exception('Bucket not found.', 400); }
+        $wm = '';
+        $link = false;
+        $pa = [ $args['bucket'] ];
+        if (array_key_exists('object', $args)) {
+            $wm = "AND object = uuid_to_bin(? ,1)";
+            $pa[] = $args['object'];
+            if (array_key_exists('link', $args)) {
+                $link = $this->generateRetrievalUri($args['object'], $args['bucket']);
+            }
+        }
+
+        $q = "
+        SELECT 
+          -- bin_to_uuid(o.`bucket`,1) AS `bucket`,
+          -- HEX(o.`hash`) AS `hash`,
+          bin_to_uuid(o.`object`,1) AS `object`, 
+          f.c_size as size,
+          f.c_mime as mime,
+          o.name as name,
+          f.c_ext as ext,
+          o.ts_created as created
+        FROM `t_stor_objects` o
+        LEFT JOIN t_stor_files f ON f.c_hash = o.hash
+        WHERE bucket = uuid_to_bin(? ,1) {$wm}
+        ";
+
+        $handle = $this->mysqli->execute_query($q, $pa);
+        $r = $handle->fetch_all(MYSQLI_ASSOC);
+
+        if ($link) { $r['link'] = $link; }
+
         $data = [
             'timestamp' => microtime(),
             'status' => 'Objects R1 OK',
-            'params' => $params,
             'service' => basename(__ROOT__),
-            'data' => $h
+            'data' => $r
         ];
         return $response->withJson($data);
     }
@@ -476,11 +507,13 @@ class ServiceController extends AbstractController
         if (!array_key_exists('exp', $args)) { throw new Exception('Expiry not defined.', 400); }
         $res = $this->decodeRetrievalKey("{$args['token']}/{$args['nonce']}/{$args['exp']}");
         if (is_null($res)) { $data['status'] = 'Not found'; return $response->withJson($data)->withStatus(404); }
+        if ($args['exp'] < time()) { $data['status'] = 'Gone'; return $response->withJson($data)->withStatus(410); }
 
         $tree = $this->name_to_path($res['obj']);
         $file = "/var/www/html/data/glued-stor/data/buckets/{$res['bkt']}/$tree/{$res['obj']}";
-        $mime = mime_content_type($file);
+
         if (file_exists($file)) {
+            $mime = mime_content_type($file);
             $response = $response
                 ->withHeader('Content-Type', $mime)
                 ->withHeader('Content-Disposition', "attachment;filename=\"{$res['obj']}.{$mime}\"")
@@ -504,7 +537,6 @@ class ServiceController extends AbstractController
         $path = $file->getStream()->getMetadata('uri');
         $mime = mime_content_type($path) ?? $file->getClientMediaType() ?? null;
         $data = [
-            'uuid' => Uuid::uuid4()->toString(),
             'name' => $file->getClientFilename(),
             'size' => $file->getSize(),
             'hash' => [
@@ -567,7 +599,7 @@ class ServiceController extends AbstractController
     }
 
 
-    private function write_object($file, $bucket): array {
+    private function write_object($file, $bucket, $meta): array {
 
         // Filter writable devices (for now, only filesystem devices are allowed)
         foreach ($bucket['devices'] as &$dev) { $dev['path'] = $this->devices($dev['uuid'])['path']; }
@@ -594,41 +626,78 @@ class ServiceController extends AbstractController
 
             // Ensure hashFile is hardlinked as objectFile. If objectFile already exists, do not use the generated objectUUID
             $objFile = $this->get_hardlink($hashFile, $bucket['uuid'])[0] ?? null;
-            if (!is_null($objFile)) { $object['uuid'] = basename($objFile); }
+            if (!is_null($objFile)) { $objUUID = basename($objFile); }
             else {
-                $objDir  = "{$device['path']}/buckets/{$bucket['uuid']}/{$this->name_to_path($object['uuid'])}";
-                $objFile = "{$objDir}/{$object['uuid']}";
+                $objUUID = Uuid::uuid4()->toString();
+                $objDir  = "{$device['path']}/buckets/{$bucket['uuid']}/{$this->name_to_path($objUUID)}";
+                $objFile = "{$objDir}/{$objUUID}";
                 if (!is_dir($objDir)) { mkdir($objDir, 0777, true); }
                 link($hashFile, $objFile);
             }
-            $object['link'] = $this->generateRetrievalUri($object['uuid'], $bucket['uuid']);
         } else { throw new \Exception('No suitable local device found'); }
 
+        $q0 = "
+        INSERT INTO `t_stor_files` (`c_data`) VALUES (?) ON DUPLICATE KEY UPDATE `c_data` = ?;
+        ";
         $q1 = "
         INSERT INTO `t_stor_objects_replicas` 
             (`object`, `device`, `balanced`, `consistent`) VALUES (uuid_to_bin(?, 1), uuid_to_bin(?, 1), ?, ?)
         ON DUPLICATE KEY UPDATE `balanced` = ?, `consistent` = ?;
         ";
+        $q2 = "
+        INSERT INTO `t_stor_objects_replicas` 
+            (`object`, `device`, `balanced`, `consistent`) VALUES (uuid_to_bin(?, 1), uuid_to_bin(?, 1), ?, ?)
+        ON DUPLICATE KEY UPDATE `ts_updated` = NOW();
+        ";
+
+        $q3 = "
+        INSERT INTO `t_stor_objects` (`bucket`,`object`,`hash`,`name`) VALUES (uuid_to_bin(?, 1), uuid_to_bin(?, 1), unhex(?), ?) ON DUPLICATE KEY UPDATE `name` = VALUES(`name`);
+        ";
 
         $this->mysqli->begin_transaction();
+        $s0 = $this->mysqli->prepare($q0);
         $s1 = $this->mysqli->prepare($q1);
-        //$s2 = $this->mysqli->prepare($q2);
-        //$s3 = $this->mysqli->prepare($q3);
-        $o = $object['uuid'];
+        $s2 = $this->mysqli->prepare($q2);
+        $s3 = $this->mysqli->prepare($q3);
+
+        $v0 = 0;
+        $v1 = 1;
+        $fn = $file->getClientFilename();
         $d = $device['uuid'];
-        $v = 1;
-        $s1->bind_param("ssiiii", $o, $d, $v, $v, $v, $v);
+        $jo = json_encode($object);
+        $b = $bucket['uuid'];
+        $h = $object['hash']['sha3-512'];
+
+        $s0->bind_param("ss", $jo, $jo);
+        $s0->execute();
+
+        $s1->bind_param("ssiiii", $objUUID, $d, $v1, $v1, $v1, $v1);
         $s1->execute();
+
+        foreach ($bucket['devices'] as $dev) {
+            if ($dev['uuid'] == $d) continue;
+            $dd = $dev['uuid'];
+            $s2->bind_param("ssii", $objUUID, $dd, $v0, $v0);
+            $s2->execute();
+        }
+        $s3->bind_param("ssss",$b,$objUUID,$h,$fn);
+        $s3->execute();
+
         $this->mysqli->commit();
+
+        $object['uuid'] = $objUUID;
+        $object['link'] = $this->generateRetrievalUri($objUUID, $bucket['uuid']);
+        $object['refs'] = $meta;
+
         return $object;
     }
 
 
+
     // TODO t_core_tokens now has only a c_inherit column. we'll need a c_owner column too, because user tokens will use c_inherit, but svc tokens will have c_owner (the one whom is the token management associated to)
     public function objects_c1(Request $request, Response $response, array $args = []): Response {
-
         // initial sanity checks
-        if (!array_key_exists('bucket', $args)) { throw new Exception('Bucket not defined.', 500); }
+        if (!array_key_exists('bucket', $args)) { throw new Exception('Bucket not found.', 400); }
         if (isset($_SERVER['CONTENT_LENGTH']) && (int) $_SERVER['CONTENT_LENGTH'] > $this->convert_units(ini_get('post_max_size'))) {
             throw new Exception(
                 'Upload size in bytes exceeds allowed limit ('.$_SERVER['CONTENT_LENGTH'].' > '.$this->convert_units(ini_get('post_max_size')).').',
@@ -637,6 +706,7 @@ class ServiceController extends AbstractController
 
 
         $bucket = $this->get_buckets($args['bucket']);
+        if ($bucket == []) { throw new \Exception("Bucket `{$args['bucket']}` not found.", 404); }
         $data['bucket'] = $bucket;
 
         //return $response->withJson($data);
@@ -650,6 +720,7 @@ class ServiceController extends AbstractController
         $headerValueArray = $request->getHeader('Accept');
         $headerValueString = $request->getHeaderLine('Accept');
 
+        $meta = json_decode($parsedBody['meta'] ?? '{}', true);
 
         if (!empty($files)) {
 
@@ -661,13 +732,9 @@ class ServiceController extends AbstractController
 
             foreach ($flattened as $file) {
                 if ($file->getError() === UPLOAD_ERR_OK) {
-                    $data['files'][] = $this->write_object($file, $bucket);
+                    $res = $this->write_object($file, $bucket, $meta[$file->getClientFilename()] ?? []);
+                    $data[] = $res;
 
-                    /*
-                    //print_r($data); echo "DIEING"; die();
-                    //$f['meta'] = json_decode($parsedBody['stor'] ?? [],true)[$file->getClientFilename()] ?? [];
-
-*/
                 } else {
                     // Add error message to response array
                     $data[] = array(
