@@ -483,7 +483,7 @@ class ServiceController extends AbstractController
 
         $handle = $this->mysqli->execute_query($q, $pa);
         $r = $handle->fetch_all(MYSQLI_ASSOC);
-
+        if ($wm !== '') { $r = $r[0]; }
         if ($link) { $r['link'] = $link; }
 
         $data = [
