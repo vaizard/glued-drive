@@ -455,8 +455,9 @@ class ServiceController extends AbstractController
         if (array_key_exists('object', $args)) {
             $wm = "AND object = uuid_to_bin(? ,1)";
             $pa[] = $args['object'];
-            if (array_key_exists('link', $args)) {
-                $link = $this->generateRetrievalUri($args['object'], $args['bucket']);
+            $link = $this->generateRetrievalUri($args['object'], $args['bucket']);
+            if (array_key_exists('method', $args)) {
+                if ($args['method'] == 'get') { return $response->withHeader('Location', $link)->withStatus(302); }
             }
         }
 
