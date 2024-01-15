@@ -8,8 +8,6 @@ use Exception;
 use mysqli_sql_exception;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
-//use Slim\Psr7\Stream;
-//use Slim\Psr7\Factory\StreamFactory;
 use Nyholm\Psr7\Factory\Psr17Factory;
 use Ramsey\Uuid\Uuid;
 
@@ -246,8 +244,6 @@ class ServiceController extends AbstractController
                 $item['status']['message'][] = "Dg doesn't have any devices configured.";
             }
         }
-
-
 
         if ($log == true) {
             $q1 = "INSERT INTO `t_stor_dgs` (`uuid`, `data`) VALUES (uuid_to_bin(?, true), ?) ON DUPLICATE KEY UPDATE `data` = VALUES(`data`)";
@@ -600,7 +596,7 @@ class ServiceController extends AbstractController
     }
 
 
-    private function write_object($file, $bucket, $meta): array {
+    private function write_object($file, $bucket, $meta = null, $refs = null): array {
 
         // Filter writable devices (for now, only filesystem devices are allowed)
         foreach ($bucket['devices'] as &$dev) { $dev['path'] = $this->devices($dev['uuid'])['path']; }
@@ -688,12 +684,47 @@ class ServiceController extends AbstractController
 
         $object['uuid'] = $objUUID;
         $object['link'] = $this->generateRetrievalUri($objUUID, $bucket['uuid']);
-        $object['refs'] = $meta;
-
+        if (isset($refs)) { $object['refs'] = $refs; }
+        if (isset($meta)) { $object['meta'] = $meta; }
         return $object;
     }
 
+    private function patch_object_meta($objUUID, $meta)
+    {
+        $q = " 
+        INSERT INTO `t_stor_objects_meta` 
+            (`uuid`, `data`) VALUES (uuid_to_bin(?, 1), ?) ON DUPLICATE KEY UPDATE data = JSON_MERGE_PATCH(data, ?);
+        ";
+        return $this->mysqli->execute_query($q, [ $objUUID, json_encode($meta), json_encode($meta) ]);
+    }
 
+    private function del_object_refs($objUUID, $refNs, $refKind, $refUUID)
+    {
+        if (!$this->is_uuidv4($objUUID) && !$this->is_uuidv4($refUUID) && !is_string($refNs) && !is_string($refKind)) return false;
+        if ($refNs === '' || $refKind === '') return false;
+        $q = "
+        DELETE FROM t_stor_object_refs
+        WHERE obj = ?
+          AND ref_ns = ?
+          AND ref_kind = ?
+          AND ref_val = ?
+        ";
+        $this->mysqli->execute_query($q, [ $objUUID, $refNs, $refKind, $refUUID ]);
+        return true;
+    }
+
+    private function add_object_refs($objUUID, $refNs, $refKind, $refUUID)
+    {
+        if (!$this->is_uuidv4($objUUID) && !$this->is_uuidv4($refUUID) && !is_string($refNs) && !is_string($refKind)) return false;
+        if ($refNs === '' || $refKind === '') return false;
+        $q = " 
+        INSERT INTO `t_stor_objects_refs` (`obj`, `ref_ns`, `ref_kind`, `ref_val`) 
+        VALUES (uuid_to_bin(?, 1), ?, ?, uuid_to_bin(?, 1)) 
+        ON DUPLICATE KEY UPDATE `ref_val` = values(`ref_val`)
+        ";
+        $this->mysqli->execute_query($q, [ $objUUID, $refNs, $refKind, $refUUID ]);
+        return true;
+    }
 
     // TODO t_core_tokens now has only a c_inherit column. we'll need a c_owner column too, because user tokens will use c_inherit, but svc tokens will have c_owner (the one whom is the token management associated to)
     public function objects_c1(Request $request, Response $response, array $args = []): Response {
@@ -705,10 +736,9 @@ class ServiceController extends AbstractController
                 400);
         }
 
-
         $bucket = $this->get_buckets($args['bucket']);
         if ($bucket == []) { throw new \Exception("Bucket `{$args['bucket']}` not found.", 404); }
-        $data['bucket'] = $bucket;
+        //$data['bucket'] = $bucket;
 
         //return $response->withJson($data);
         $files        = $request->getUploadedFiles();
@@ -722,6 +752,8 @@ class ServiceController extends AbstractController
         $headerValueString = $request->getHeaderLine('Accept');
 
         $meta = json_decode($parsedBody['meta'] ?? '{}', true);
+        $refs = json_decode($parsedBody['refs'] ?? '{}', true);
+
 
         if (!empty($files)) {
 
@@ -730,12 +762,25 @@ class ServiceController extends AbstractController
                 if (is_array($f)) { foreach ($f as $kk=>$ff) { $flattened[$k.'+'.$kk] = $ff; } }
                 else { $flattened[$k] = $f; }
             }
-
             foreach ($flattened as $file) {
                 if ($file->getError() === UPLOAD_ERR_OK) {
-                    $res = $this->write_object($file, $bucket, $meta[$file->getClientFilename()] ?? []);
+                    $objMeta = $meta[$file->getClientFilename()] ?? [];
+                    $objRefs = $refs[$file->getClientFilename()] ?? [];
+                    $res = $this->write_object($file, $bucket, $objMeta, $objRefs);
+                    $this->mysqli->begin_transaction();
+                    $this->patch_object_meta($res['uuid'], $objMeta);
+                    foreach ($objRefs as $rk => $refUUIDs) {
+                        $parts = explode(':', $rk, 2);
+                        if (count($parts) == 1) { array_unshift($parts, "_"); }
+                        list($refNs, $refKind) = $parts;
+                        if (is_string($refUUIDs)) { $refUUIDs = [ $refUUIDs ]; }
+                        if (!is_array($refUUIDs)) { throw new \Exception('Ref value must be a UUID or list of UUIDs.'); }
+                        foreach ($refUUIDs as $refUUID) {
+                            $this->add_object_refs($res['uuid'], $refNs, $refKind, $refUUID);
+                        }
+                    }
+                    $this->mysqli->commit();
                     $data[] = $res;
-
                 } else {
                     // Add error message to response array
                     $data[] = array(
@@ -745,6 +790,7 @@ class ServiceController extends AbstractController
                     );
                 }
             }
+
             return $response->withJson($data)->withStatus(200);
         } else {
             return $response->withJson([ 'error' => 'No files were attached to the request.' ])->withStatus(400);
