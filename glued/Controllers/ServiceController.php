@@ -689,7 +689,7 @@ class ServiceController extends AbstractController
         return $object;
     }
 
-    private function patch_object_meta($objUUID, $meta)
+    private function patch_object_meta($objUUID, $meta = '{}')
     {
         $q = " 
         INSERT INTO `t_stor_objects_meta` 
