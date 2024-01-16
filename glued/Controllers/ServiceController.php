@@ -472,12 +472,18 @@ class ServiceController extends AbstractController
           o.name as name,
           f.c_ext as ext,
           o.ts_created as created,
+          -- om.data as meta,
+          CASE 
+            WHEN om.data IS NULL OR JSON_LENGTH(om.data) = 0 THEN NULL
+            ELSE om.data
+          END AS meta,
           fwd.refs,
           back.backrefs
         FROM `t_stor_objects` o
         LEFT JOIN t_stor_files f ON f.c_hash = o.hash
         LEFT JOIN v_stor_refs_fwd fwd ON fwd.object = o.object
         LEFT JOIN v_stor_refs_back back ON back.object = o.object
+        LEFT JOIN t_stor_objects_meta om ON  om.uuid = o.object
         WHERE bucket = uuid_to_bin(? ,1) {$wm}
         ";
 
@@ -487,7 +493,7 @@ class ServiceController extends AbstractController
         foreach ($r as &$rr) {
             if (isset($rr['refs'])) { $rr['refs'] = json_decode($rr['refs']); }
             if (isset($rr['backrefs'])) { $rr['backrefs'] = json_decode($rr['backrefs']); }
-            if (isset($rr['backrefs'])) { $rr['backrefs'] = json_decode($rr['backrefs']); }
+            if (isset($rr['meta'])) { $rr['meta'] = json_decode($rr['meta']); }
         }
         if ($wm !== '') { $r = $r[0]; }
         if ($link) { $r['link'] = $link; }
