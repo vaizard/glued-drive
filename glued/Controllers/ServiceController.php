@@ -421,7 +421,7 @@ class ServiceController extends AbstractController
     }
 
     /// ///////////////////////////////////////////////////////////////////////////////
-    /// OBJECTS (data objects) FILES (links)
+    /// OBJECTS (data objects)
     /// ///////////////////////////////////////////////////////////////////////////////
 
     /**
@@ -444,98 +444,6 @@ class ServiceController extends AbstractController
             }
         }
         return ($hardlinks ?? []);
-    }
-
-
-    public function objects_r1(Request $request, Response $response, array $args = []): Response {
-
-        if (!array_key_exists('bucket', $args)) { throw new Exception('Bucket not found.', 400); }
-        $wm = '';
-        $link = false;
-        $pa = [ $args['bucket'] ];
-        if (array_key_exists('object', $args)) {
-            $wm = "AND o.object = uuid_to_bin(? ,1)";
-            $pa[] = $args['object'];
-            $link = $this->generateRetrievalUri($args['object'], $args['bucket']);
-            if (array_key_exists('method', $args)) {
-                if ($args['method'] == 'get') { return $response->withHeader('Location', $link)->withStatus(302); }
-            }
-        }
-
-        $q = "
-        SELECT 
-          -- bin_to_uuid(o.`bucket`,1) AS `bucket`,
-          -- HEX(o.`hash`) AS `hash`,
-          bin_to_uuid(o.`object`,1) AS `object`, 
-          f.c_size as size,
-          f.c_mime as mime,
-          o.name as name,
-          f.c_ext as ext,
-          o.ts_created as created,
-          -- om.data as meta,
-          CASE 
-            WHEN om.data IS NULL OR JSON_LENGTH(om.data) = 0 THEN NULL
-            ELSE om.data
-          END AS meta,
-          fwd.refs,
-          back.backrefs
-        FROM `t_stor_objects` o
-        LEFT JOIN t_stor_files f ON f.c_hash = o.hash
-        LEFT JOIN v_stor_refs_fwd fwd ON fwd.object = o.object
-        LEFT JOIN v_stor_refs_back back ON back.object = o.object
-        LEFT JOIN t_stor_objects_meta om ON  om.uuid = o.object
-        WHERE bucket = uuid_to_bin(? ,1) {$wm}
-        ";
-
-        $handle = $this->mysqli->execute_query($q, $pa);
-        $r = $handle->fetch_all(MYSQLI_ASSOC);
-        if ($handle->num_rows == 0) { throw new \Exception('Not found.', 404); }
-        foreach ($r as &$rr) {
-            if (isset($rr['refs'])) { $rr['refs'] = json_decode($rr['refs']); }
-            if (isset($rr['backrefs'])) { $rr['backrefs'] = json_decode($rr['backrefs']); }
-            if (isset($rr['meta'])) { $rr['meta'] = json_decode($rr['meta']); }
-        }
-        if ($wm !== '') { $r = $r[0]; }
-        if ($link) { $r['link'] = $link; }
-
-        $data = [
-            'timestamp' => microtime(),
-            'status' => 'Objects R1 OK',
-            'service' => basename(__ROOT__),
-            'data' => $r
-        ];
-        return $response->withJson($data);
-    }
-
-    public function links_r1(Request $request, Response $response, array $args = []): Response {
-        $data = [
-            'timestamp' => microtime(),
-            'status' => 'ok',
-            'service' => basename(__ROOT__)
-        ];
-        $params = $request->getQueryParams();
-        if (!array_key_exists('token', $args)) { throw new Exception('Token not defined.', 400); }
-        if (!array_key_exists('nonce', $args)) { throw new Exception('Nonce not defined.', 400); }
-        if (!array_key_exists('exp', $args)) { throw new Exception('Expiry not defined.', 400); }
-        $res = $this->decodeRetrievalKey("{$args['token']}/{$args['nonce']}/{$args['exp']}");
-        if (is_null($res)) { $data['status'] = 'Not found'; return $response->withJson($data)->withStatus(404); }
-        if ($args['exp'] < time()) { $data['status'] = 'Gone'; return $response->withJson($data)->withStatus(410); }
-
-        $tree = $this->name_to_path($res['obj']);
-        $file = "/var/www/html/data/glued-stor/data/buckets/{$res['bkt']}/$tree/{$res['obj']}";
-
-        if (file_exists($file)) {
-            $mime = mime_content_type($file);
-            $fileStream = fopen($file, 'rb');
-            $stream = (new Psr17Factory())->createStreamFromResource($fileStream);
-
-            $response = $response
-                ->withHeader('Content-Type', $mime)
-                ->withHeader('Content-Disposition', "attachment;filename=\"{$res['obj']}.{$mime}\"")
-                ->withHeader('Content-Length', filesize($file));
-            $response->getBody()->write($stream->getContents());
-            return $response;
-        } else { $data['status'] = 'Not found'; return $response->withJson($data)->withStatus(404); }
     }
 
 
@@ -566,55 +474,59 @@ class ServiceController extends AbstractController
         return $data;
     }
 
-    function generateRetrievalUri($object, $bucket, $ttl = 3600): string {
-        $base = $this->settings['glued']['protocol'].$this->settings['glued']['hostname'].$this->settings['routes']['be_stor_links_v1']['path'] . '/';
-        $data = $base . $this->generateRetrievalKey($bucket, $object, 3600);
-        return $data;
-    }
-
-
-    public function generateRetrievalKey($bkt, $obj, $ttl = 3600): string
+    private function patch_object_meta($objUUID, $meta = [])
     {
-        $iat = time();
-        $exp = (string) ($iat + $ttl);
-        $nonce   = random_bytes(SODIUM_CRYPTO_SECRETBOX_NONCEBYTES - strlen($exp) - 1);
-        $key     = sodium_crypto_generichash($this->pkey . $exp, '', SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
-        $payload = sodium_crypto_secretbox("$bkt/$obj/$ttl/$exp", $nonce  . '/' . $exp, $key);
-        $token   = sodium_bin2base64($payload, SODIUM_BASE64_VARIANT_URLSAFE)  . '/' . sodium_bin2base64($nonce, SODIUM_BASE64_VARIANT_URLSAFE)  . '/' . $exp;
-        return $token;
+        $q = " 
+        INSERT INTO `t_stor_objects_meta` 
+            (`uuid`, `data`) VALUES (uuid_to_bin(?, 1), ?) ON DUPLICATE KEY UPDATE data = JSON_MERGE_PATCH(data, ?);
+        ";
+        return $this->mysqli->execute_query($q, [ $objUUID, json_encode($meta), json_encode($meta) ]);
     }
 
-    public function decodeRetrievalKey(string $token): ?array
+    private function add_object_refs($objUUID, $refNs, $refKind, $refUUID)
     {
-        // Split the token into payload, nonce, and expiration parts
-        // Handle invalid tokens (all necessary token parts must be present)
-        $tokenParts = explode('/', $token);
-        if (count($tokenParts) !== 3) { return null; }
-        list($payload, $nonce, $exp) = $tokenParts;
-
-        // Decode the payload and nonce from base64
-        // Handle tampered nonce/expiry, calculate the private key
-        // Handle the case where decryption fails
-        $payload = sodium_base642bin($payload, SODIUM_BASE64_VARIANT_URLSAFE);
-        $nonce = sodium_base642bin($nonce, SODIUM_BASE64_VARIANT_URLSAFE);
-        if (strlen("{$nonce}/{$exp}") !== SODIUM_CRYPTO_SECRETBOX_NONCEBYTES) { return null; }
-        $key = sodium_crypto_generichash($this->pkey . $exp, '', SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
-
-        // Decrypt the payload using the nonce, key, and additional data
-        // Handle the case where decryption fails
-        $decrypted = sodium_crypto_secretbox_open($payload, $nonce . '/' . $exp, $key);
-        if ($decrypted === false) { return null; }
-        list($bkt, $obj, $ttl, $exp) = explode('/', $decrypted);
-        return [
-            'bkt' => $bkt,
-            'obj' => $obj,
-            'iat' => (int) ($exp - $ttl),
-            'exp' => (int) $exp,
-        ];
+        if (!$this->is_uuidv4($objUUID) && !$this->is_uuidv4($refUUID) && !is_string($refNs) && !is_string($refKind)) return false;
+        if ($refNs === '' || $refKind === '') return false;
+        $q = " 
+        INSERT INTO `t_stor_objects_refs` (`obj`, `ref_ns`, `ref_kind`, `ref_val`) 
+        VALUES (uuid_to_bin(?, 1), ?, ?, uuid_to_bin(?, 1)) 
+        ON DUPLICATE KEY UPDATE `ref_val` = values(`ref_val`)
+        ";
+        $this->mysqli->execute_query($q, [ $objUUID, $refNs, $refKind, $refUUID ]);
+        return true;
     }
 
+    private function del_object_refs($objUUID, $refNs, $refKind, $refUUID)
+    {
+        if (!$this->is_uuidv4($objUUID) && !$this->is_uuidv4($refUUID) && !is_string($refNs) && !is_string($refKind)) return false;
+        if ($refNs === '' || $refKind === '') return false;
+        $q = "
+        DELETE FROM t_stor_objects_refs
+        WHERE obj = uuid_to_bin(?, 1)
+          AND ref_ns = ?
+          AND ref_kind = ?
+          AND ref_val = uuid_to_bin(?, 1)
+        ";
+        $this->mysqli->execute_query($q, [ $objUUID, $refNs, $refKind, $refUUID ]);
+        return true;
+    }
 
-    private function write_object($file, $bucket, $meta = null, $refs = null): array {
+    private function object_refs($objUUID, $objRefs, $action = null): void {
+        foreach ($objRefs as $rk => $refUUIDs) {
+            $parts = explode(':', $rk, 2);
+            if (count($parts) == 1) { array_unshift($parts, "_"); }
+            list($refNs, $refKind) = $parts;
+            if (is_string($refUUIDs)) { $refUUIDs = [ $refUUIDs ]; }
+            if (!is_array($refUUIDs)) { throw new \Exception('Ref value must be a UUID or list of UUIDs.'); }
+            foreach ($refUUIDs as $refUUID) {
+                if ( $action === 'add' ) { $this->add_object_refs($objUUID, $refNs, $refKind, $refUUID); }
+                elseif ( $action === 'del' ) { $this->del_object_refs($objUUID, $refNs, $refKind, $refUUID); }
+                else { throw new \Exception('Bad action.'); }
+            }
+        }
+    }
+
+private function write_object($file, $bucket, $meta = null, $refs = null): array {
 
         // Filter writable devices (for now, only filesystem devices are allowed)
         foreach ($bucket['devices'] as &$dev) { $dev['path'] = $this->devices($dev['uuid'])['path']; }
@@ -624,13 +536,11 @@ class ServiceController extends AbstractController
         });
         if (count($localDevices) == 0) { throw new \Exception('No local writable devices available/online'); }
         $device = $localDevices[0];
-
         // Get uploaded file metadata
         $object = $this->object_meta($file);
 
         // File storing logic
         if ($device['adapter'] === 'filesystem') {
-
             // Ensure $file identified with hash($file) exists
             $hashDir  = "{$device['path']}/hashes/{$this->name_to_path($object['hash']['sha3-512'])}";
             $hashFile = "{$hashDir}/{$object['hash']['sha3-512']}";
@@ -638,7 +548,6 @@ class ServiceController extends AbstractController
                 if (!is_dir($hashDir)) { mkdir($hashDir, 0777, true); }
                 $file->moveTo($hashFile);
             }
-
             // Ensure hashFile is hardlinked as objectFile. If objectFile already exists, do not use the generated objectUUID
             $objFile = $this->get_hardlink($hashFile, $bucket['uuid'])[0] ?? null;
             if (!is_null($objFile)) { $objUUID = basename($objFile); }
@@ -707,43 +616,6 @@ class ServiceController extends AbstractController
         return $object;
     }
 
-    private function patch_object_meta($objUUID, $meta = '{}')
-    {
-        $q = " 
-        INSERT INTO `t_stor_objects_meta` 
-            (`uuid`, `data`) VALUES (uuid_to_bin(?, 1), ?) ON DUPLICATE KEY UPDATE data = JSON_MERGE_PATCH(data, ?);
-        ";
-        return $this->mysqli->execute_query($q, [ $objUUID, json_encode($meta), json_encode($meta) ]);
-    }
-
-    private function del_object_refs($objUUID, $refNs, $refKind, $refUUID)
-    {
-        if (!$this->is_uuidv4($objUUID) && !$this->is_uuidv4($refUUID) && !is_string($refNs) && !is_string($refKind)) return false;
-        if ($refNs === '' || $refKind === '') return false;
-        $q = "
-        DELETE FROM t_stor_object_refs
-        WHERE obj = ?
-          AND ref_ns = ?
-          AND ref_kind = ?
-          AND ref_val = ?
-        ";
-        $this->mysqli->execute_query($q, [ $objUUID, $refNs, $refKind, $refUUID ]);
-        return true;
-    }
-
-    private function add_object_refs($objUUID, $refNs, $refKind, $refUUID)
-    {
-        if (!$this->is_uuidv4($objUUID) && !$this->is_uuidv4($refUUID) && !is_string($refNs) && !is_string($refKind)) return false;
-        if ($refNs === '' || $refKind === '') return false;
-        $q = " 
-        INSERT INTO `t_stor_objects_refs` (`obj`, `ref_ns`, `ref_kind`, `ref_val`) 
-        VALUES (uuid_to_bin(?, 1), ?, ?, uuid_to_bin(?, 1)) 
-        ON DUPLICATE KEY UPDATE `ref_val` = values(`ref_val`)
-        ";
-        $this->mysqli->execute_query($q, [ $objUUID, $refNs, $refKind, $refUUID ]);
-        return true;
-    }
-
     // TODO t_core_tokens now has only a c_inherit column. we'll need a c_owner column too, because user tokens will use c_inherit, but svc tokens will have c_owner (the one whom is the token management associated to)
     public function objects_c1(Request $request, Response $response, array $args = []): Response {
         // initial sanity checks
@@ -756,9 +628,7 @@ class ServiceController extends AbstractController
 
         $bucket = $this->get_buckets($args['bucket']);
         if ($bucket == []) { throw new \Exception("Bucket `{$args['bucket']}` not found.", 404); }
-        //$data['bucket'] = $bucket;
 
-        //return $response->withJson($data);
         $files        = $request->getUploadedFiles();
         $parsedBody   = $request->getParsedBody();
         $hdrUser      = $request->getHeader('X-glued-auth-uuid')[0] ?? null;
@@ -771,7 +641,6 @@ class ServiceController extends AbstractController
 
         $meta = json_decode($parsedBody['meta'] ?? '{}', true);
         $refs = json_decode($parsedBody['refs'] ?? '{}', true);
-
 
         if (!empty($files)) {
 
@@ -787,16 +656,8 @@ class ServiceController extends AbstractController
                     $res = $this->write_object($file, $bucket, $objMeta, $objRefs);
                     $this->mysqli->begin_transaction();
                     $this->patch_object_meta($res['uuid'], $objMeta);
-                    foreach ($objRefs as $rk => $refUUIDs) {
-                        $parts = explode(':', $rk, 2);
-                        if (count($parts) == 1) { array_unshift($parts, "_"); }
-                        list($refNs, $refKind) = $parts;
-                        if (is_string($refUUIDs)) { $refUUIDs = [ $refUUIDs ]; }
-                        if (!is_array($refUUIDs)) { throw new \Exception('Ref value must be a UUID or list of UUIDs.'); }
-                        foreach ($refUUIDs as $refUUID) {
-                            $this->add_object_refs($res['uuid'], $refNs, $refKind, $refUUID);
-                        }
-                    }
+                    return $response->withJson($objRefs);
+                    $this->object_refs($res['uuid'], $objRefs, 'add');
                     $this->mysqli->commit();
                     $data[] = $res;
                 } else {
@@ -808,17 +669,235 @@ class ServiceController extends AbstractController
                     );
                 }
             }
-
             return $response->withJson($data)->withStatus(200);
         } else {
             return $response->withJson([ 'error' => 'No files were attached to the request.' ])->withStatus(400);
         }
     }
 
+    public function objects_r1(Request $request, Response $response, array $args = []): Response {
+        if (!array_key_exists('bucket', $args)) { throw new Exception('Bucket not found.', 400); }
+        $wm = '';
+        $link = false;
+        $pa = [ $args['bucket'] ];
+        if (array_key_exists('object', $args)) {
+            $wm = "AND o.object = uuid_to_bin(? ,1)";
+            $pa[] = $args['object'];
+            $link = $this->generateRetrievalUri($args['object'], $args['bucket']);
+            if (array_key_exists('method', $args)) {
+                if ($args['method'] == 'get') { return $response->withHeader('Location', $link)->withStatus(302); }
+            }
+        }
+        $q = "
+        SELECT 
+          -- bin_to_uuid(o.`bucket`,1) AS `bucket`,
+          -- HEX(o.`hash`) AS `hash`,
+          bin_to_uuid(o.`object`,1) AS `object`, 
+          f.c_size as size,
+          f.c_mime as mime,
+          o.name as name,
+          f.c_ext as ext,
+          o.ts_created as created,
+          CASE 
+            WHEN om.data IS NULL OR JSON_LENGTH(om.data) = 0 THEN NULL
+            ELSE om.data
+          END AS meta,
+          fwd.refs,
+          back.backrefs
+        FROM `t_stor_objects` o
+        LEFT JOIN t_stor_files f ON f.c_hash = o.hash
+        LEFT JOIN v_stor_refs_fwd fwd ON fwd.object = o.object
+        LEFT JOIN v_stor_refs_back back ON back.object = o.object
+        LEFT JOIN t_stor_objects_meta om ON  om.uuid = o.object
+        WHERE bucket = uuid_to_bin(? ,1) {$wm}
+        ";
+
+        $handle = $this->mysqli->execute_query($q, $pa);
+        $r = $handle->fetch_all(MYSQLI_ASSOC);
+        if ($handle->num_rows == 0) { throw new \Exception('Not found.', 404); }
+        foreach ($r as &$rr) {
+            if (isset($rr['refs'])) { $rr['refs'] = json_decode($rr['refs']); }
+            if (isset($rr['backrefs'])) { $rr['backrefs'] = json_decode($rr['backrefs']); }
+            if (isset($rr['meta'])) { $rr['meta'] = json_decode($rr['meta']); }
+        }
+        if ($wm !== '') { $r = $r[0]; }
+        if ($link) { $r['link'] = $link; }
+        $data = [
+            'timestamp' => microtime(),
+            'status' => 'Objects R1 OK',
+            'service' => basename(__ROOT__),
+            'data' => $r
+        ];
+        return $response->withJson($data);
+    }
+
+
+    public function objects_d1(Request $request, Response $response, array $args = []): Response
+    {
+        $data = [
+            'timestamp' => microtime(),
+            'status' => '501 Not implemented',
+            'service' => basename(__ROOT__),
+            'data' => null
+        ];
+        if (!array_key_exists('bucket', $args)) {
+            throw new Exception('Bucket not found.', 400);
+        }
+        if (array_key_exists('object', $args)) {
+            if (array_key_exists('method', $args)) {
+                if ($args['method'] == 'refs') {
+                    $data['status'] = "Deleted";
+                    $body = json_decode($request->getBody()->getContents(), true);
+                    $firstkey = array_values($body)[0];
+                    if (!is_string($firstkey)) { throw new \Exception('Request body must be reftype: [uuid] object'); }
+                    $this->object_refs($args['object'], $body, 'del');
+                    return $response->withJson($data)->withStatus(200);
+                }
+            }
+        }
+        return $response->withJson($data)->withStatus(501);
+    }
+
+    public function objects_put1(Request $request, Response $response, array $args = []): Response
+    {
+        $data = [
+            'timestamp' => microtime(),
+            'status' => '501 Not implemented',
+            'service' => basename(__ROOT__),
+            'data' => null
+        ];
+        if (!array_key_exists('bucket', $args)) {
+            throw new Exception('Bucket not found.', 400);
+        }
+        if (array_key_exists('object', $args)) {
+            if (array_key_exists('method', $args)) {
+                if ($args['method'] == 'refs') {
+                    $data['status'] = "Added";
+                    $body = json_decode($request->getBody()->getContents(), true);
+                    $firstkey = array_values($body)[0];
+                    if (!is_string($firstkey)) { throw new \Exception('Request body must be reftype: [uuid] object'); }
+                    $this->object_refs($args['object'], $body, 'add');
+                    return $response->withJson($data)->withStatus(200);
+                }
+            }
+        }
+        return $response->withJson($data)->withStatus(501);
+    }
+
+    public function objects_p1(Request $request, Response $response, array $args = []): Response
+    {
+        $data = [
+            'timestamp' => microtime(),
+            'status' => '501 Not implemented',
+            'service' => basename(__ROOT__),
+            'data' => null
+        ];
+        if (!array_key_exists('bucket', $args)) {
+            throw new Exception('Bucket not found.', 400);
+        }
+        if (array_key_exists('object', $args)) {
+            if (array_key_exists('method', $args)) {
+                if ($args['method'] == 'refs') {
+                    $data['status'] = "Patched";
+                    $body = json_decode($request->getBody()->getContents());
+                    if (is_null($body)) { throw new \Exception('Request body must be a valid json'); }
+                    $this->patch_object_meta($args['object'], $body);
+                    return $response->withJson($data)->withStatus(200);
+                }
+            }
+        }
+        return $response->withJson($data)->withStatus(501);
+    }
+
+    /// ///////////////////////////////////////////////////////////////////////////////
+    /// OBJECTS (data objects)
+    /// ///////////////////////////////////////////////////////////////////////////////
+
+
+    public function generateRetrievalKey($bkt, $obj, $ttl = 3600): string
+    {
+        $iat = time();
+        $exp = (string) ($iat + $ttl);
+        $nonce   = random_bytes(SODIUM_CRYPTO_SECRETBOX_NONCEBYTES - strlen($exp) - 1);
+        $key     = sodium_crypto_generichash($this->pkey . $exp, '', SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
+        $payload = sodium_crypto_secretbox("$bkt/$obj/$ttl/$exp", $nonce  . '/' . $exp, $key);
+        $token   = sodium_bin2base64($payload, SODIUM_BASE64_VARIANT_URLSAFE)  . '/' . sodium_bin2base64($nonce, SODIUM_BASE64_VARIANT_URLSAFE)  . '/' . $exp;
+        return $token;
+    }
+
+    function generateRetrievalUri($object, $bucket, $ttl = 3600): string {
+        $base = $this->settings['glued']['protocol'].$this->settings['glued']['hostname'].$this->settings['routes']['be_stor_links_v1']['path'] . '/';
+        $data = $base . $this->generateRetrievalKey($bucket, $object, 3600);
+        return $data;
+    }
+    public function decodeRetrievalKey(string $token): ?array
+    {
+        // Split the token into payload, nonce, and expiration parts
+        // Handle invalid tokens (all necessary token parts must be present)
+        $tokenParts = explode('/', $token);
+        if (count($tokenParts) !== 3) { return null; }
+        list($payload, $nonce, $exp) = $tokenParts;
+
+        // Decode the payload and nonce from base64
+        // Handle tampered nonce/expiry, calculate the private key
+        // Handle the case where decryption fails
+        $payload = sodium_base642bin($payload, SODIUM_BASE64_VARIANT_URLSAFE);
+        $nonce = sodium_base642bin($nonce, SODIUM_BASE64_VARIANT_URLSAFE);
+        if (strlen("{$nonce}/{$exp}") !== SODIUM_CRYPTO_SECRETBOX_NONCEBYTES) { return null; }
+        $key = sodium_crypto_generichash($this->pkey . $exp, '', SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
+
+        // Decrypt the payload using the nonce, key, and additional data
+        // Handle the case where decryption fails
+        $decrypted = sodium_crypto_secretbox_open($payload, $nonce . '/' . $exp, $key);
+        if ($decrypted === false) { return null; }
+        list($bkt, $obj, $ttl, $exp) = explode('/', $decrypted);
+        return [
+            'bkt' => $bkt,
+            'obj' => $obj,
+            'iat' => (int) ($exp - $ttl),
+            'exp' => (int) $exp,
+        ];
+    }
+
+    public function links_r1(Request $request, Response $response, array $args = []): Response {
+        $data = [
+            'timestamp' => microtime(),
+            'status' => 'ok',
+            'service' => basename(__ROOT__)
+        ];
+        $params = $request->getQueryParams();
+        if (!array_key_exists('token', $args)) { throw new Exception('Token not defined.', 400); }
+        if (!array_key_exists('nonce', $args)) { throw new Exception('Nonce not defined.', 400); }
+        if (!array_key_exists('exp', $args)) { throw new Exception('Expiry not defined.', 400); }
+        $res = $this->decodeRetrievalKey("{$args['token']}/{$args['nonce']}/{$args['exp']}");
+        if (is_null($res)) { $data['status'] = 'Not found'; return $response->withJson($data)->withStatus(404); }
+        if ($args['exp'] < time()) { $data['status'] = 'Gone'; return $response->withJson($data)->withStatus(410); }
+
+        $tree = $this->name_to_path($res['obj']);
+        $file = "/var/www/html/data/glued-stor/data/buckets/{$res['bkt']}/$tree/{$res['obj']}";
+
+        if (file_exists($file)) {
+            $mime = mime_content_type($file);
+            $fileStream = fopen($file, 'rb');
+            $stream = (new Psr17Factory())->createStreamFromResource($fileStream);
+
+            $response = $response
+                ->withHeader('Content-Type', $mime)
+                ->withHeader('Content-Disposition', "attachment;filename=\"{$res['obj']}.{$mime}\"")
+                ->withHeader('Content-Length', filesize($file));
+            $response->getBody()->write($stream->getContents());
+            return $response;
+        } else { $data['status'] = 'Not found'; return $response->withJson($data)->withStatus(404); }
+    }
+
+    /// ///////////////////////////////////////////////////////////////////////////////
+    /// FETCH OBJECTS (data objects)
+    /// ///////////////////////////////////////////////////////////////////////////////
+
+
     public function download(Request $request, Response $response, array $args = []): Response {
         $params = $request->getQueryParams();
         $data = [];
-
         $curl_handle = curl_init();
         $extra_opts[CURLOPT_URL] = $uri;
         $curl_options = array_replace( $this->settings['php']['curl'], $extra_opts );
@@ -826,7 +905,6 @@ class ServiceController extends AbstractController
         $data = curl_exec($curl_handle);
         curl_close($curl_handle);
         return $data;
-
         return $response->withJson($data);
     }
 
@@ -861,16 +939,8 @@ class ServiceController extends AbstractController
             ];
         $status = $this->status();
         $status['os'] = PHP_OS;
-        /*
-        $status['dgh-def'] = $this->get_dg_uuid();
-        $status['dgh-usr'] = $this->get_dg_uuid('1c8964ab-b60e-4407-bc06-309faabd4db8');
-        $status['dev-def'] = $this->device_handle();
-        $status['dev-def2'] = $this->device_handle([ 'enabled' => true ],'default');
-        */
         $data['data'] = $status;
         return $response->withJson($data);
     }
-
-
 
 }

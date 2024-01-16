@@ -58,6 +58,9 @@ routes:
         methods:
             get:    Glued\Controllers\ServiceController:objects_r1
             post:   Glued\Controllers\ServiceController:objects_c1
+            patch:  Glued\Controllers\ServiceController:objects_p1
+            delete: Glued\Controllers\ServiceController:objects_d1
+            put:    Glued\Controllers\ServiceController:objects_put1
 
     be_stor_buckets_v1:
         pattern:    ${routes.be_stor.path}/v1/buckets[/{id}]
