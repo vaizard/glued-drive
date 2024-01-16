@@ -7,20 +7,7 @@ SET sql_mode = 'NO_AUTO_VALUE_ON_ZERO';
 
 SET NAMES utf8mb4;
 
-DROP TABLE IF EXISTS `t_stor_bucket_dgs`;
-DROP TABLE IF EXISTS `t_stor_dgs`;
-DROP TABLE IF EXISTS `t_stor_files`;
-DROP TABLE IF EXISTS `t_stor_objects_meta`;
 
-DROP TABLE IF EXISTS `t_stor_buckets`;
-DROP TABLE IF EXISTS `t_stor_configlog`;
-DROP TABLE IF EXISTS `t_stor_devices`;
-DROP TABLE IF EXISTS `t_stor_objects_refs`;
-
-DROP TABLE IF EXISTS `t_stor_objects`;
-
-
-DROP TABLE IF EXISTS `t_stor_objects_replicas`;
 
 CREATE TABLE `t_stor_buckets` (
                                   `uuid` binary(16) NOT NULL DEFAULT (uuid_to_bin(uuid(),true)) COMMENT 'Bucket UUID',
@@ -86,8 +73,7 @@ CREATE TABLE `t_stor_objects` (
 
 
 CREATE TABLE `t_stor_objects_meta` (
-                                       `uuid` binary(16) NOT NULL COMMENT 'Link UUID',
-                                       `namespace` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT 'Metadata namespace',
+                                       `uuid` binary(16) NOT NULL COMMENT 'Object UUID',
                                        `data` json NOT NULL COMMENT 'Metadata json',
                                        PRIMARY KEY (`uuid`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='App specific metadata related to a particular link';
@@ -95,15 +81,14 @@ CREATE TABLE `t_stor_objects_meta` (
 
 
 CREATE TABLE `t_stor_objects_refs` (
-                                       `uuid1` binary(16) NOT NULL COMMENT 'Link UUID 1',
-                                       `uuid2` binary(16) NOT NULL COMMENT 'Link UUID 2',
-                                       `scope` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT 'Reference scope',
-                                       `kind` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT 'Reference kind',
-                                       `ts_created` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Create timestamp',
-                                       KEY `uuid1` (`uuid1`),
-                                       KEY `uuid2` (`uuid2`),
-                                       KEY `scope` (`scope`),
-                                       KEY `kind` (`kind`)
+                                       `obj` binary(16) NOT NULL COMMENT 'Object UUID',
+                                       `ref_ns` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT '_' COMMENT 'Reference namespace',
+                                       `ref_kind` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT 'Reference kind',
+                                       `ref_val` binary(16) NOT NULL COMMENT 'Reference UUID',
+                                       `obj_created` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Created timestamp',
+                                       PRIMARY KEY (`obj`,`ref_ns`,`ref_kind`,`ref_val`),
+                                       KEY `obj` (`obj`),
+                                       KEY `obj_obj_generation` (`obj`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='References between objects';
 
 
@@ -119,6 +104,28 @@ CREATE TABLE `t_stor_objects_replicas` (
                                            UNIQUE KEY `unique_object_device` (`object`,`device`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+
+
+CREATE TABLE `t_stor_statuslog` (
+                                    `uuid` binary(16) NOT NULL DEFAULT (uuid_to_bin(uuid(),true)) COMMENT 'Status line UUID',
+                                    `uuid_dg` binary(16) NOT NULL COMMENT 'Dg UUID',
+                                    `uuid_dev` binary(16) NOT NULL COMMENT 'Device UUID',
+                                    `prio` int NOT NULL DEFAULT '1000' COMMENT 'Device priority in dg',
+                                    `role` varchar(16) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL DEFAULT 'undefined' COMMENT 'Device role dg',
+                                    `data` json NOT NULL COMMENT 'Device status JSON',
+                                    `health` varchar(16) GENERATED ALWAYS AS (coalesce(json_unquote(json_extract(`data`,_utf8mb4'$.health')),_utf8mb4'undefined')) VIRTUAL COMMENT 'Device health status',
+                                    `ts_created` datetime(1) DEFAULT CURRENT_TIMESTAMP(1) COMMENT 'Timestamp Created with precision of 1 second',
+                                    `ts_updated` datetime(1) DEFAULT CURRENT_TIMESTAMP(1) ON UPDATE CURRENT_TIMESTAMP(1) COMMENT 'Timestamp Updated with precision of 1 second',
+                                    `boundary` bigint GENERATED ALWAYS AS ((floor((`ts_created` / 86400)) * 86400)) STORED COMMENT 'Boundary timestamp rounded to 24 hours (86400 seconds)',
+                                    `data_hash` binary(16) GENERATED ALWAYS AS (unhex(md5(`data`))) STORED COMMENT 'Device status hash',
+                                    `uniq_hash` binary(16) GENERATED ALWAYS AS (unhex(md5(concat(`uuid_dg`,`uuid_dev`,`data`,`boundary`)))) STORED COMMENT 'Unique row hash',
+                                    PRIMARY KEY (`uuid`),
+                                    UNIQUE KEY `uk_uniq_hash` (`uniq_hash`),
+                                    KEY `idx_health_prefix` (`health`(2))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Stor devices/dgs status log. Uniqueness based on Device UUID, partial hash, and creation timestamp (24 hours intervals)';
+
+
+
 CREATE TABLE `t_stor_bucket_dgs` (
                                      `bucket` binary(16) NOT NULL COMMENT 'Bucket UUID (foreign key)',
                                      `dg` binary(16) NOT NULL COMMENT 'Bucket device group UUID (foreign key)',
@@ -129,60 +136,90 @@ CREATE TABLE `t_stor_bucket_dgs` (
                                      CONSTRAINT `t_stor_bucket_dgs_ibfk_2` FOREIGN KEY (`dg`) REFERENCES `t_stor_dgs` (`uuid`) ON DELETE RESTRICT ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Stor Buckets are isolated containers for links with assignable storage device groups (dgs)';
 
-
-
-
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET @saved_cs_client = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 
 CREATE OR REPLACE VIEW v_stor_status AS
-WITH RankedStatus AS (
-    SELECT
-        t_stor_statuslog.uuid_dg AS uuid_dg,
-        t_stor_statuslog.uuid_dev AS uuid_dev,
-        t_stor_statuslog.ts_updated AS ts_updated,
-        t_stor_statuslog.health AS health,
-        t_stor_statuslog.prio AS prio,
-        t_stor_statuslog.role AS role,
-        ROW_NUMBER() OVER (PARTITION BY t_stor_statuslog.uuid_dg,t_stor_statuslog.uuid_dev ORDER BY t_stor_statuslog.ts_created DESC) AS row_num
-    FROM
-        t_stor_statuslog
-)
-Select
-    BIN_TO_UUID(status.uuid_dg, true) as dg_uuid,
-    BIN_TO_UUID(status.uuid_dev, true) as dev_uuid,
-    IFNULL(status.ts_updated, CAST(NOW() AS DATETIME)) AS status_ts,
-    IFNULL(status.health, 'undefined') AS dev_health,
-    status.prio AS dev_prio,
-    status.role AS dev_role,
-    ifnull(dev.data->>'$.adapter','unknown') AS dev_adapter,
-    dgs.data AS dg_data,
-    dev.data AS dev_data,
-    (CASE WHEN (
-        SUM((CASE WHEN (IFNULL(status.health, 'empty') <> 'online') THEN 1 ELSE 0 END)) OVER (PARTITION BY status.uuid_dg) > 0
-        ) THEN 'degraded' ELSE 'online' END) AS dg_health
+WITH RankedStatus AS (SELECT t_stor_statuslog.uuid_dg                                                                                                      AS uuid_dg,
+                             t_stor_statuslog.uuid_dev                                                                                                     AS uuid_dev,
+                             t_stor_statuslog.ts_updated                                                                                                   AS ts_updated,
+                             t_stor_statuslog.health                                                                                                       AS health,
+                             t_stor_statuslog.prio                                                                                                         AS prio,
+                             t_stor_statuslog.role                                                                                                         AS role,
+                             ROW_NUMBER() OVER (PARTITION BY t_stor_statuslog.uuid_dg,t_stor_statuslog.uuid_dev ORDER BY t_stor_statuslog.ts_created DESC) AS row_num
+                      FROM t_stor_statuslog)
+Select BIN_TO_UUID(status.uuid_dg, true)                  as dg_uuid,
+       BIN_TO_UUID(status.uuid_dev, true)                 as dev_uuid,
+       IFNULL(status.ts_updated, CAST(NOW() AS DATETIME)) AS status_ts,
+       IFNULL(status.health, 'undefined')                 AS dev_health,
+       status.prio                                        AS dev_prio,
+       status.role                                        AS dev_role,
+       ifnull(dev.data ->> '$.adapter', 'unknown')        AS dev_adapter,
+       dgs.data                                           AS dg_data,
+       dev.data                                           AS dev_data,
+       (CASE
+            WHEN (
+                SUM((CASE WHEN (IFNULL(status.health, 'empty') <> 'online') THEN 1 ELSE 0 END))
+                    OVER (PARTITION BY status.uuid_dg) > 0
+                ) THEN 'degraded'
+            ELSE 'online' END)                            AS dg_health
 from RankedStatus status
          left join t_stor_dgs dgs ON (status.uuid_dg = dgs.uuid)
          left join t_stor_devices dev ON (status.uuid_dev = dev.uuid)
 where status.row_num = 1
-GROUP BY
-    dg_uuid,
-    dev_uuid,
-    dg_data,
-    status_ts,
-    dev_health,
-    dev_prio,
-    dev_role,
-    dev_adapter,
-    dev_data,
-    status.health,
-    status.uuid_dg;
+GROUP BY dg_uuid,
+         dev_uuid,
+         dg_data,
+         status_ts,
+         dev_health,
+         dev_prio,
+         dev_role,
+         dev_adapter,
+         dev_data,
+         status.health,
+         status.uuid_dg;
 
+
+CREATE OR REPLACE VIEW v_stor_refs_fwd AS
+SELECT obj AS object,
+       JSON_OBJECTAGG(
+               key_name,
+               json_array
+       )   AS refs
+FROM (SELECT obj,
+             IF(ref_ns = '_', ref_kind, CONCAT(ref_ns, ':', ref_kind)) AS key_name,
+             JSON_ARRAYAGG(bin_to_uuid(ref_val, 1))                    AS json_array
+      FROM t_stor_objects_refs
+      GROUP BY obj, ref_ns, ref_kind) AS subquery
+GROUP BY obj;
+
+CREATE OR REPLACE VIEW v_stor_refs_back AS
+SELECT ref_val as object,
+       JSON_OBJECTAGG(
+               key_name,
+               json_array
+       )       AS backrefs
+FROM (SELECT ref_val,
+             IF(ref_ns = '_', ref_kind, CONCAT(ref_ns, ':', ref_kind)) AS key_name,
+             JSON_ARRAYAGG(bin_to_uuid(obj, 1))                        AS json_array
+      FROM t_stor_objects_refs
+      GROUP BY ref_val, ref_ns, ref_kind) AS subquery
+GROUP BY ref_val;
 
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 -- migrate:down
 
-DROP TABLE `t_stor_links`;
-DROP TABLE `t_stor_objects`;
-DROP VIEW `v_stor_status`;
+DROP TABLE IF EXISTS `t_stor_bucket_dgs`;
+DROP TABLE IF EXISTS `t_stor_dgs`;
+DROP TABLE IF EXISTS `t_stor_files`;
+DROP TABLE IF EXISTS `t_stor_objects_meta`;
+DROP TABLE IF EXISTS `t_stor_buckets`;
+DROP TABLE IF EXISTS `t_stor_configlog`;
+DROP TABLE IF EXISTS `t_stor_devices`;
+DROP TABLE IF EXISTS `t_stor_objects_refs`;
+DROP TABLE IF EXISTS `t_stor_objects`;
+DROP TABLE IF EXISTS `t_stor_objects_replicas`;
+DROP VIEW IF EXISTS `v_stor_status`;
+DROP VIEW IF EXISTS `v_stor_refs_back`;
+DROP VIEW IF EXISTS `v_stor_refs_fwd`;

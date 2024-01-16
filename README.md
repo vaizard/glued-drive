@@ -12,7 +12,7 @@ curl 'https://glued/api/stor/v1/buckets' --compressed -X POST -H 'User-Agent: Mo
 ```
 
 ```shell
-curl -k -X POST https://glued.industra.space/api/stor/v1/buckets/85d6a1f5-fed1-41b4-b4f3-3e3b206ea21f/objects     -H 'Authorization: Bearer gtk_35MCHFgkNh1PymQEOLStzMtESdo4DZXykoYWvjX9QcQ='     -H 'Content-Type: multipart/form-data'     -F 'links={ "Ryanair.pdf": { "uuid": "77384ad2-80a4-11ee-9edc-9747c96a1231", "parent": "bd4a3c4a-80a6-11ee-8e34-67217a8a9f66", "app": { "name": "client-name", "instance": "https://glued.example.com", "discover": "/api/client-name/v1/endpoint/someID" }}, "eastern loves_INDUSTRA.png": {}};type=application/json'     -F 'file[]=@/home/killua/Ryanair.pdf'     -F 'file[]=@/home/killua/eastern loves_INDUSTRA.png'     -F 'file[]=@/home/killua/todo-petru'      -F 'field1=fiels2' | jq .
+ curl -k -X POST https://glued/api/stor/v1/buckets/1fcb4d5c-5364-4cf3-b24e-070c4c71f8d2/objects      -H 'Authorization: Bearer gtk_35MCHFgkNh1PymQEOLStzMtESdo4DZXykoYWvjX9QcQ='      -H 'Content-Type: multipart/form-data'      -F 'refs={"Ryanair.pdf":{"predecessor":"77384ad2-80a4-11ee-9edc-9747c96a1231","sekatko:vpd":["77384ad2-80a4-11ee-9edc-9747c96a1231", "bd4a3c4a-80a6-11ee-8e34-67217a8a9f66"]}};type=application/json'      -F 'meta={"Ryanair.pdf":{"sekatko":{"ocr":"sometext"},"otherapp":{"whatever":"https://glued.example.com"}}};type=application/json'      -F 'file[]=@/home/killua/Ryanair.pdf'      -F 'file[]=@/home/killua/eastern loves_INDUSTRA.png'      -F 'file[]=@/home/killua/todo-petru'      -F 'field1=fiels2' | jq .
 ```
 TODO: token
 
@@ -22,14 +22,7 @@ TODO: token
 
 ```bash
 #new
-curl -k -X POST https://glued/api/stor/v1/buckets/1fcb4d5c-5364-4cf3-b24e-070c4c71f8d2/objects \
-     -H 'Authorization: Bearer gtk_35MCHFgkNh1PymQEOLStzMtESdo4DZXykoYWvjX9QcQ=' \
-     -H 'Content-Type: multipart/form-data' \
-     -F 'attr={"Ryanair.pdf":{"refs":{"predecessor":"77384ad2-80a4-11ee-9edc-9747c96a1231","sekatko:vpd":"bd4a3c4a-80a6-11ee-8e34-67217a8a9f66"},"meta":{"sekatko":{"ocr":"sometext"},"otherapp":{"whatever":"https://glued.example.com"}}}};type=application/json' \
-     -F 'file[]=@/home/killua/Ryanair.pdf' \
-     -F 'file[]=@/home/killua/eastern loves_INDUSTRA.png' \
-     -F 'file[]=@/home/killua/todo-petru' \
-     -F 'field1=fiels2' | jq .
+curl -k -X POST https://glued/api/stor/v1/buckets/1fcb4d5c-5364-4cf3-b24e-070c4c71f8d2/objects      -H 'Authorization: Bearer gtk_35MCHFgkNh1PymQEOLStzMtESdo4DZXykoYWvjX9QcQ='      -H 'Content-Type: multipart/form-data'      -F 'refs={"Ryanair.pdf":{"predecessor":"77384ad2-80a4-11ee-9edc-9747c96a1231","sekatko:vpd":["77384ad2-80a4-11ee-9edc-9747c96a1231", "bd4a3c4a-80a6-11ee-8e34-67217a8a9f66"]}};type=application/json'      -F 'meta={"Ryanair.pdf":{"sekatko":{"ocr":"sometext"},"otherapp":{"whatever":"https://glued.example.com"}}};type=application/json'      -F 'file[]=@/home/killua/Ryanair.pdf'      -F 'file[]=@/home/killua/eastern loves_INDUSTRA.png'      -F 'file[]=@/home/killua/todo-petru'      -F 'field1=fiels2' | jq .
 ```
 
 

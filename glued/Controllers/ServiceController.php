@@ -374,6 +374,7 @@ class ServiceController extends AbstractController
     public function buckets_r1(Request $request, Response $response, array $args = []): Response {
         $params = $request->getQueryParams();
         $b = $this->get_buckets($args['id'] ?? null);
+        # TODO empty bukcets https://glued.industra.space/api/stor/v1/buckets
         if ($b == []) { throw new \Exception("Bucket `{$args['id']}` not found.", 404); }
         $data = [
             'timestamp' => microtime(),
@@ -453,7 +454,7 @@ class ServiceController extends AbstractController
         $link = false;
         $pa = [ $args['bucket'] ];
         if (array_key_exists('object', $args)) {
-            $wm = "AND object = uuid_to_bin(? ,1)";
+            $wm = "AND o.object = uuid_to_bin(? ,1)";
             $pa[] = $args['object'];
             $link = $this->generateRetrievalUri($args['object'], $args['bucket']);
             if (array_key_exists('method', $args)) {
@@ -470,14 +471,24 @@ class ServiceController extends AbstractController
           f.c_mime as mime,
           o.name as name,
           f.c_ext as ext,
-          o.ts_created as created
+          o.ts_created as created,
+          fwd.refs,
+          back.backrefs
         FROM `t_stor_objects` o
         LEFT JOIN t_stor_files f ON f.c_hash = o.hash
+        LEFT JOIN v_stor_refs_fwd fwd ON fwd.object = o.object
+        LEFT JOIN v_stor_refs_back back ON back.object = o.object
         WHERE bucket = uuid_to_bin(? ,1) {$wm}
         ";
 
         $handle = $this->mysqli->execute_query($q, $pa);
         $r = $handle->fetch_all(MYSQLI_ASSOC);
+        if ($handle->num_rows == 0) { throw new \Exception('Not found.', 404); }
+        foreach ($r as &$rr) {
+            if (isset($rr['refs'])) { $rr['refs'] = json_decode($rr['refs']); }
+            if (isset($rr['backrefs'])) { $rr['backrefs'] = json_decode($rr['backrefs']); }
+            if (isset($rr['backrefs'])) { $rr['backrefs'] = json_decode($rr['backrefs']); }
+        }
         if ($wm !== '') { $r = $r[0]; }
         if ($link) { $r['link'] = $link; }
 
