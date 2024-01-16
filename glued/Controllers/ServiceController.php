@@ -656,7 +656,6 @@ private function write_object($file, $bucket, $meta = null, $refs = null): array
                     $res = $this->write_object($file, $bucket, $objMeta, $objRefs);
                     $this->mysqli->begin_transaction();
                     $this->patch_object_meta($res['uuid'], $objMeta);
-                    return $response->withJson($objRefs);
                     $this->object_refs($res['uuid'], $objRefs, 'add');
                     $this->mysqli->commit();
                     $data[] = $res;
