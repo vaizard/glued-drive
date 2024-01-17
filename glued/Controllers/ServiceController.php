@@ -11,6 +11,8 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 use Nyholm\Psr7\Factory\Psr17Factory;
 use Ramsey\Uuid\Uuid;
 
+
+
 class ServiceController extends AbstractController
 {
 
@@ -675,6 +677,13 @@ private function write_object($file, $bucket, $meta = null, $refs = null): array
     }
 
     public function objects_r1(Request $request, Response $response, array $args = []): Response {
+        $data = [
+            'timestamp' => microtime(),
+            'status' => 'Objects R1 OK',
+            'service' => basename(__ROOT__),
+            'data' => []
+        ];
+
         if (!array_key_exists('bucket', $args)) { throw new Exception('Bucket not found.', 400); }
         $wm = '';
         $link = false;
@@ -713,7 +722,10 @@ private function write_object($file, $bucket, $meta = null, $refs = null): array
 
         $handle = $this->mysqli->execute_query($q, $pa);
         $r = $handle->fetch_all(MYSQLI_ASSOC);
-        if ($handle->num_rows == 0) { throw new \Exception('Not found.', 404); }
+        if ($handle->num_rows == 0) {
+            if ($this->get_buckets($args['bucket']) == []) { throw new \Exception('Bucket not found.', 404); }
+            return $response->withJson($data);
+        }
         foreach ($r as &$rr) {
             if (isset($rr['refs'])) { $rr['refs'] = json_decode($rr['refs']); }
             if (isset($rr['backrefs'])) { $rr['backrefs'] = json_decode($rr['backrefs']); }
@@ -721,12 +733,7 @@ private function write_object($file, $bucket, $meta = null, $refs = null): array
         }
         if ($wm !== '') { $r = $r[0]; }
         if ($link) { $r['link'] = $link; }
-        $data = [
-            'timestamp' => microtime(),
-            'status' => 'Objects R1 OK',
-            'service' => basename(__ROOT__),
-            'data' => $r
-        ];
+        $data['data'] = $r;
         return $response->withJson($data);
     }
 
@@ -883,8 +890,7 @@ private function write_object($file, $bucket, $meta = null, $refs = null): array
                 ->withHeader('Content-Length', filesize($file));
             $fileStream = fopen($file, 'rb');
             $stream = (new Psr17Factory())->createStreamFromResource($fileStream);
-            $response = $response->withBody($stream);
-            return $response;
+            return $response->withBody($stream);
         } else { $data['status'] = 'Not found'; return $response->withJson($data)->withStatus(404); }
     }
 
@@ -918,7 +924,6 @@ private function write_object($file, $bucket, $meta = null, $refs = null): array
         $res['dgs'] = $this->dgs();
         return $res;
     }
-
 
     /**
      * Returns a health status response.
