@@ -877,14 +877,13 @@ private function write_object($file, $bucket, $meta = null, $refs = null): array
 
         if (file_exists($file)) {
             $mime = mime_content_type($file);
-            $fileStream = fopen($file, 'rb');
-            $stream = (new Psr17Factory())->createStreamFromResource($fileStream);
-
             $response = $response
                 ->withHeader('Content-Type', $mime)
                 ->withHeader('Content-Disposition', "attachment;filename=\"{$res['obj']}.{$mime}\"")
                 ->withHeader('Content-Length', filesize($file));
-            $response->getBody()->write($stream->getContents());
+            $fileStream = fopen($file, 'rb');
+            $stream = (new Psr17Factory())->createStreamFromResource($fileStream);
+            $response = $response->withBody($stream);
             return $response;
         } else { $data['status'] = 'Not found'; return $response->withJson($data)->withStatus(404); }
     }
