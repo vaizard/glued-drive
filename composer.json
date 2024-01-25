@@ -21,9 +21,9 @@
     "ext-mysqli": "*",
     "ext-readline": "*",
     "ext-soap": "*",
+    "ext-sodium": "*",
     "ext-xml": "*",
     "facile-it/php-openid-client": "dev-master",
-    "foxy/foxy": "^v1.3",
     "geocoder-php/geoip2-provider": "^4",
     "guzzlehttp/psr7": "^2",
     "http-interop/http-factory-guzzle": "^1",
@@ -44,17 +44,17 @@
     "thingengineer/mysqli-database-class": "dev-master#42116651a88b57b03fd967bc57dd38f5094565d9",
     "voku/anti-xss": "^4",
     "zeuxisoo/slim-whoops": "^0.7",
+    "symfony/config": "^5",
     "selective/transformer": "^1",
     "casbin/database-adapter": "^1",
     "ramsey/uuid": "^4",
     "vaizard/glued-lib": "dev-main",
     "grasmash/yaml-expander": "^3",
     "vlucas/phpdotenv": "^5",
-    "keiko/uuid-shortener": "^0.6.1",
+    "keiko/uuid-shortener": "^1",
     "shuchkin/simplexlsxgen": "^1.2",
     "youthweb/urllinker": "^1.4",
-    "galbar/jsonpath": "^2.1",
-    "ext-sodium": "*"
+    "galbar/jsonpath": "^2.1"
   },
   "suggest": {
     "ext-xdebug": "For dev only"
@@ -111,7 +111,6 @@
     "post-update-cmd": [
       "composer configure || echo \"[FAIL] Failed to configure glued. Please make sure all env variables are set. Rerun composer configure.\"",
       "composer migrate",
-      "patch -s --reject-file=/dev/null -p1 vendor/monolog/monolog/src/Monolog/Logger.php < vendor/vaizard/glued-lib/src/Patches/Logger.patch",
       "echo \"Run 'composer nginx' manually to pick restart this microservice\""
     ],
     "settings": [
@@ -122,7 +121,6 @@
   "config": {
     "allow-plugins": {
       "ergebnis/composer-normalize": true,
-      "foxy/foxy": true,
       "php-http/discovery": true
     }
   }

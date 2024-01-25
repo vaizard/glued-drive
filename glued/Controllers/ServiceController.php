@@ -886,7 +886,7 @@ private function write_object($file, $bucket, $meta = null, $refs = null): array
             $mime = mime_content_type($file);
             $response = $response
                 ->withHeader('Content-Type', $mime)
-                ->withHeader('Content-Disposition', "attachment;filename=\"{$res['obj']}.{$mime}\"")
+                ->withHeader('Content-Disposition', "inline;filename=\"{$res['obj']}.{$mime}\"")
                 ->withHeader('Content-Length', filesize($file));
             $fileStream = fopen($file, 'rb');
             $stream = (new Psr17Factory())->createStreamFromResource($fileStream);
