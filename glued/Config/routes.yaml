@@ -50,7 +50,7 @@ routes:
             get:    Glued\Controllers\ServiceController:dgs_r1
 
     be_stor_objects_v1:
-        pattern:    ${routes.be_stor.path}/v1/buckets/{bucket}/objects[/{object}[/{method}]]
+        pattern:    ${routes.be_stor.path}/v1/buckets/{bucket}/objects[/{object}[/{element}]]
         path:       ${routes.be_stor.path}/v1/buckets
         label:      objects
         dscr:       Data objects

@@ -536,7 +536,7 @@ private function write_object($file, $bucket, $meta = null, $refs = null): array
             return isset($device["path"]) && is_string($device["path"]) &&
                 $device["health"] == "online" && $device["role"] == "storage" && $device["adapter"] == "filesystem";
         });
-        if (count($localDevices) == 0) { throw new \Exception('No local writable devices available/online'); }
+        if (count($localDevices) == 0) { throw new \Exception('No local writable devices configured/online', 500); }
         $device = $localDevices[0];
         // Get uploaded file metadata
         $object = $this->object_meta($file);
@@ -740,85 +740,71 @@ private function write_object($file, $bucket, $meta = null, $refs = null): array
 
     public function objects_d1(Request $request, Response $response, array $args = []): Response
     {
-        $data = [
-            'timestamp' => microtime(),
-            'status' => '501 Not implemented',
-            'service' => basename(__ROOT__),
-            'data' => null
-        ];
-        if (!array_key_exists('bucket', $args)) {
-            throw new Exception('Bucket not found.', 400);
+        if (!array_key_exists('bucket', $args)) { throw new Exception('Bucket UUID missing in request uri `/api/stor/v1/buckets/{bucket}/objects/{object}/{element}`.', 400); }
+        if (!array_key_exists('object', $args)) { throw new Exception('Object UUID missing in request uri `/api/stor/v1/buckets/{bucket}/objects/{object}/{element}`.', 400); }
+        if (!array_key_exists('element', $args)) { throw new Exception('Element UUID missing in request uri `/api/stor/v1/buckets/{bucket}/objects/{object}/{element}`.', 400); }
+        if ($args['element'] == 'refs') {
+            $body = $request->getParsedBody();
+            if (is_null($body)) { throw new \Exception('Request body must be a valid json', 400); }
+            $this->object_refs($args['object'], $body, 'del');
+            $data = [
+                'timestamp' => microtime(),
+                'status' => '200 Deleted',
+                'service' => basename(__ROOT__),
+                'data' => $body
+            ];
+            return $response->withJson($data)->withStatus(200);
+        } else {
+            throw new Exception('DELETE request supported elements are: `refs`.', 400);
         }
-        if (array_key_exists('object', $args)) {
-            if (array_key_exists('method', $args)) {
-                if ($args['method'] == 'refs') {
-                    $data['status'] = "Deleted";
-                    $body = json_decode($request->getBody()->getContents(), true);
-                    $firstkey = array_values($body)[0];
-                    if (!is_string($firstkey)) { throw new \Exception('Request body must be reftype: [uuid] object'); }
-                    $this->object_refs($args['object'], $body, 'del');
-                    return $response->withJson($data)->withStatus(200);
-                }
-            }
-        }
-        return $response->withJson($data)->withStatus(501);
     }
+
 
     public function objects_put1(Request $request, Response $response, array $args = []): Response
     {
-        $data = [
-            'timestamp' => microtime(),
-            'status' => '501 Not implemented',
-            'service' => basename(__ROOT__),
-            'data' => null
-        ];
-        if (!array_key_exists('bucket', $args)) {
-            throw new Exception('Bucket not found.', 400);
+        if (!array_key_exists('bucket', $args)) { throw new Exception('Bucket UUID missing in request uri `/api/stor/v1/buckets/{bucket}/objects/{object}/{element}`.', 400); }
+        if (!array_key_exists('object', $args)) { throw new Exception('Object UUID missing in request uri `/api/stor/v1/buckets/{bucket}/objects/{object}/{element}`.', 400); }
+        if (!array_key_exists('element', $args)) { throw new Exception('Element UUID missing in request uri `/api/stor/v1/buckets/{bucket}/objects/{object}/{element}`.', 400); }
+        if ($args['element'] == 'refs') {
+            $body = $request->getParsedBody();
+            if (is_null($body)) { throw new \Exception('Request body must be a valid json', 400); }
+            $this->object_refs($args['object'], $body, 'add');
+            $data = [
+                'timestamp' => microtime(),
+                'status' => '200 Added',
+                'service' => basename(__ROOT__),
+                'data' => $body
+            ];
+            return $response->withJson($data)->withStatus(200);
+        } else {
+            throw new Exception('PUT request supported elements are: `refs`.', 400);
         }
-        if (array_key_exists('object', $args)) {
-            if (array_key_exists('method', $args)) {
-                if ($args['method'] == 'refs') {
-                    $data['status'] = "Added";
-                    $body = json_decode($request->getBody()->getContents(), true);
-                    $firstkey = array_values($body)[0];
-                    if (!is_string($firstkey)) { throw new \Exception('Request body must be reftype: [uuid] object'); }
-                    $this->object_refs($args['object'], $body, 'add');
-                    return $response->withJson($data)->withStatus(200);
-                }
-            }
-        }
-        return $response->withJson($data)->withStatus(501);
     }
 
     public function objects_p1(Request $request, Response $response, array $args = []): Response
     {
-        $data = [
-            'timestamp' => microtime(),
-            'status' => '501 Not implemented',
-            'service' => basename(__ROOT__),
-            'data' => null
-        ];
-        if (!array_key_exists('bucket', $args)) {
-            throw new Exception('Bucket not found.', 400);
+        if (!array_key_exists('bucket', $args)) { throw new Exception('Bucket UUID missing in request uri `/api/stor/v1/buckets/{bucket}/objects/{object}/{element}`.', 400); }
+        if (!array_key_exists('object', $args)) { throw new Exception('Object UUID missing in request uri `/api/stor/v1/buckets/{bucket}/objects/{object}/{element}`.', 400); }
+        if (!array_key_exists('element', $args)) { throw new Exception('Element UUID missing in request uri `/api/stor/v1/buckets/{bucket}/objects/{object}/{element}`.', 400); }
+        if ($args['element'] == 'meta') {
+            $body = $request->getParsedBody();
+            if (is_null($body)) { throw new \Exception('Request body must be a valid json', 400); }
+            $this->patch_object_meta($args['object'], $body);
+            $data = [
+                'timestamp' => microtime(),
+                'status' => '200 Patched',
+                'service' => basename(__ROOT__),
+                'data' => $body
+            ];
+            return $response->withJson($data)->withStatus(200);
+        } else {
+            throw new Exception('PATCH request supported elements are: `meta`.', 400);
         }
-        if (array_key_exists('object', $args)) {
-            if (array_key_exists('method', $args)) {
-                if ($args['method'] == 'refs') {
-                    $data['status'] = "Patched";
-                    $body = json_decode($request->getBody()->getContents());
-                    if (is_null($body)) { throw new \Exception('Request body must be a valid json'); }
-                    $this->patch_object_meta($args['object'], $body);
-                    return $response->withJson($data)->withStatus(200);
-                }
-            }
-        }
-        return $response->withJson($data)->withStatus(501);
     }
 
     /// ///////////////////////////////////////////////////////////////////////////////
     /// OBJECTS (data objects)
     /// ///////////////////////////////////////////////////////////////////////////////
-
 
     public function generateRetrievalKey($bkt, $obj, $ttl = 3600): string
     {

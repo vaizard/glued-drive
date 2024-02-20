@@ -22,7 +22,7 @@ TODO: token
 
 ```bash
 #create a new file
-#curl -k -X POST https://glued/api/stor/v1/buckets/1fcb4d5c-5364-4cf3-b24e-070c4c71f8d2/objects
+#curl -k -X POST https://glued/api/stor/v1/buckets/1fcb4d5c-5364-4cf3-b24e-070c4c71f8d2/objects \
 curl -k -X POST https://gdev.industra.space/api/stor/v1/buckets/30ef1e33-da44-4503-85b0-a2ba41e2d82e/objects \
       -H 'Authorization: Bearer gtk_35MCHFgkNh1PymQEOLStzMtESdo4DZXykoYWvjX9QcQ=' \
       -H 'Content-Type: multipart/form-data' \
@@ -31,6 +31,11 @@ curl -k -X POST https://gdev.industra.space/api/stor/v1/buckets/30ef1e33-da44-45
       -F 'file[]=@/home/killua/Ryanair.pdf' \
       -F 'file[]=@/home/killua/eastern loves_INDUSTRA.png' \
       -F 'field1=fiels2' | jq .
+
+curl -k -X PATCH "https://glued/api/stor/v1/buckets/1fcb4d5c-5364-4cf3-b24e-070c4c71f8d2/objects/a2134852-e39f-4b81-8071-2971d1d48506/meta" -H "Content-Type: application/json" -d '{"example": 1}'
+curl -k -X PATCH "https://gdev.industra.space/api/stor/v1/buckets/30ef1e33-da44-4503-85b0-a2ba41e2d82e/objects/e4f2ce6f-f4db-462d-8712-61928a5142f2/meta" -H "Content-Type: application/json" -d '{"example": 1}'
+curl -k -X PUT "https://glued/api/stor/v1/buckets/1fcb4d5c-5364-4cf3-b24e-070c4c71f8d2/objects/a2134852-e39f-4b81-8071-2971d1d48506/refs" -H "Content-Type: application/json" -d '{"predecessor": "a2134852-e39f-4b81-8071-2971d1d48506", "sekatko:vpd": "a2134852-e39f-4b81-8071-2971d1d48506"}'
+curl -k -X DELETE "https://glued/api/stor/v1/buckets/1fcb4d5c-5364-4cf3-b24e-070c4c71f8d2/objects/a2134852-e39f-4b81-8071-2971d1d48506/refs" -H "Content-Type: application/json" -d '{"predecessor": "a2134852-e39f-4b81-8071-2971d1d48506", "sekatko:vpd": "a2134852-e39f-4b81-8071-2971d1d48506"}'
 ```
 
 
