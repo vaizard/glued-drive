@@ -531,7 +531,7 @@ class ServiceController extends AbstractController
 private function write_object($file, $bucket, $meta = null, $refs = null): array {
 
         // Filter writable devices (for now, only filesystem devices are allowed)
-        foreach ($bucket['devices'] as &$dev) { $dev['path'] = $this->devices($dev['uuid'])['path']; }
+        foreach ($bucket['devices'] as &$dev) { $dev['path'] = $this->devices($dev['uuid'])['path'] ?? null; }
         $localDevices = array_filter($bucket['devices'], function ($device) {
             return isset($device["path"]) && is_string($device["path"]) &&
                 $device["health"] == "online" && $device["role"] == "storage" && $device["adapter"] == "filesystem";

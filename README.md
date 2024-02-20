@@ -21,8 +21,16 @@ TODO: token
 ## Using from the command line
 
 ```bash
-#new
-curl -k -X POST https://glued/api/stor/v1/buckets/1fcb4d5c-5364-4cf3-b24e-070c4c71f8d2/objects      -H 'Authorization: Bearer gtk_35MCHFgkNh1PymQEOLStzMtESdo4DZXykoYWvjX9QcQ='      -H 'Content-Type: multipart/form-data'      -F 'refs={"Ryanair.pdf":{"predecessor":"77384ad2-80a4-11ee-9edc-9747c96a1231","sekatko:vpd":["77384ad2-80a4-11ee-9edc-9747c96a1231", "bd4a3c4a-80a6-11ee-8e34-67217a8a9f66"]}};type=application/json'      -F 'meta={"Ryanair.pdf":{"sekatko":{"ocr":"sometext"},"otherapp":{"whatever":"https://glued.example.com"}}};type=application/json'      -F 'file[]=@/home/killua/Ryanair.pdf'      -F 'file[]=@/home/killua/eastern loves_INDUSTRA.png'      -F 'file[]=@/home/killua/todo-petru'      -F 'field1=fiels2' | jq .
+#create a new file
+#curl -k -X POST https://glued/api/stor/v1/buckets/1fcb4d5c-5364-4cf3-b24e-070c4c71f8d2/objects
+curl -k -X POST https://gdev.industra.space/api/stor/v1/buckets/30ef1e33-da44-4503-85b0-a2ba41e2d82e/objects \
+      -H 'Authorization: Bearer gtk_35MCHFgkNh1PymQEOLStzMtESdo4DZXykoYWvjX9QcQ=' \
+      -H 'Content-Type: multipart/form-data' \
+      -F 'refs={"Ryanair.pdf":{"predecessor":"77384ad2-80a4-11ee-9edc-9747c96a1231","sekatko:vpd":["77384ad2-80a4-11ee-9edc-9747c96a1231", "bd4a3c4a-80a6-11ee-8e34-67217a8a9f66"]}};type=application/json' \
+      -F 'meta={"Ryanair.pdf":{"sekatko":{"ocr":"sometext"},"otherapp":{"whatever":"https://glued.example.com"}}};type=application/json' \
+      -F 'file[]=@/home/killua/Ryanair.pdf' \
+      -F 'file[]=@/home/killua/eastern loves_INDUSTRA.png' \
+      -F 'field1=fiels2' | jq .
 ```
 
 
