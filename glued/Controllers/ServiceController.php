@@ -692,8 +692,8 @@ private function write_object($file, $bucket, $meta = null, $refs = null): array
             $wm = "AND o.object = uuid_to_bin(? ,1)";
             $pa[] = $args['object'];
             $link = $this->generateRetrievalUri($args['object'], $args['bucket']);
-            if (array_key_exists('method', $args)) {
-                if ($args['method'] == 'get') { return $response->withHeader('Location', $link)->withStatus(302); }
+            if (array_key_exists('element', $args)) {
+                if ($args['element'] == 'get') { return $response->withHeader('Location', $link)->withStatus(302); }
             }
         }
         $q = "
