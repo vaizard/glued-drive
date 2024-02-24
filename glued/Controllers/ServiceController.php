@@ -688,14 +688,23 @@ private function write_object($file, $bucket, $meta = null, $refs = null): array
         $wm = '';
         $link = false;
         $pa = [ $args['bucket'] ];
+
         if (array_key_exists('object', $args)) {
-            $wm = "AND o.object = uuid_to_bin(? ,1)";
+            $wm .= " AND o.object = uuid_to_bin(? ,1)";
             $pa[] = $args['object'];
             $link = $this->generateRetrievalUri($args['object'], $args['bucket']);
-            if (array_key_exists('element', $args)) {
-                if ($args['element'] == 'get') { return $response->withHeader('Location', $link)->withStatus(302); }
+            if (array_key_exists('method', $args)) {
+                if ($args['method'] == 'get') { return $response->withHeader('Location', $link)->withStatus(302); }
             }
         }
+
+        $qp = $request->getQueryParams();
+        foreach ($qp as $k=>$v) {
+            $wm .= "AND CAST(JSON_EXTRACT(om.data, ?) as CHAR) = ?";
+            $pa[] = str_replace('_', '.', $k);
+            $pa[] = $v;
+        }
+
         $q = "
         SELECT 
           -- bin_to_uuid(o.`bucket`,1) AS `bucket`,
