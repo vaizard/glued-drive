@@ -700,8 +700,11 @@ private function write_object($file, $bucket, $meta = null, $refs = null): array
 
         $qp = $request->getQueryParams();
         foreach ($qp as $k=>$v) {
+            $kp = explode('.', str_replace('_', '.', $k), 2);
+            if ($kp[0] != 'meta') { continue; }
+            $path = $kp[1] ?? '';
             $wm .= "AND CAST(JSON_EXTRACT(om.data, ?) as CHAR) = ?";
-            $pa[] = str_replace('_', '.', $k);
+            $pa[] = "$.{$path}";
             $pa[] = $v;
         }
 
