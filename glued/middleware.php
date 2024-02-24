@@ -36,9 +36,21 @@ $app->addBodyParsingMiddleware();
 // in TrailingSlash controls the inclusion of the port the Location header
 // of the redirect. Not including the port is wanted as this microservice
 // is supposed to run behind the nginx+glued-core as its auth proxy, otherwise
-// users would get redirected directly to the backend port.
-// TODO: fix glued-lib trailingSlash to do only path-based redirects (no full url)
-$trailingSlash = new TrailingSlash(false, false);
+// users would get redirected directly to the backend port. Finally, the third
+// parameter is populated by all routes marked with providing `ingress`.
+// These routes are considered the entry points to the api and in regard to
+// the frontend/backend setup of the microservices, the trailing slash
+// should not be removed on ingress path.
+
+$ingressPaths = array_filter($settings['routes'], function ($route) {
+    return isset($route['provides']) && $route['provides'] === 'ingress';
+});
+$ingressPaths = array_map(function ($route) {
+    return rtrim($route['path'], '/') . '/';  // Append a '/' if the path does not already end with one
+}, $ingressPaths);
+$ingressPaths = array_values($ingressPaths);
+
+$trailingSlash = new TrailingSlash(false, false, $ingressPaths);
 $trailingSlash->redirect();
 $app->add($trailingSlash);
 

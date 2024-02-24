@@ -6,11 +6,10 @@ namespace Glued\Controllers;
 
 use Exception;
 use mysqli_sql_exception;
+use Nyholm\Psr7\Factory\Psr17Factory;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
-use Nyholm\Psr7\Factory\Psr17Factory;
 use Ramsey\Uuid\Uuid;
-
 
 
 class ServiceController extends AbstractController
@@ -702,8 +701,9 @@ private function write_object($file, $bucket, $meta = null, $refs = null): array
         foreach ($qp as $k=>$v) {
             $kp = explode('.', str_replace('_', '.', $k), 2);
             if ($kp[0] != 'meta') { continue; }
-            $path = $kp[1] ?? '';
-            $wm .= "AND CAST(JSON_EXTRACT(om.data, ?) as CHAR) = ?";
+            $patharr = explode('.', $kp[1] ?? '');
+            $path = '"'.implode('"."',$patharr).'"';
+            $wm .= 'AND CAST(JSON_UNQUOTE(JSON_EXTRACT(om.data, ?)) as CHAR) = ?';
             $pa[] = "$.{$path}";
             $pa[] = $v;
         }
@@ -752,12 +752,59 @@ private function write_object($file, $bucket, $meta = null, $refs = null): array
 
     public function objects_d1(Request $request, Response $response, array $args = []): Response
     {
+        $candidate = false;
         if (!array_key_exists('bucket', $args)) { throw new Exception('Bucket UUID missing in request uri `/api/stor/v1/buckets/{bucket}/objects/{object}/{element}`.', 400); }
         if (!array_key_exists('object', $args)) { throw new Exception('Object UUID missing in request uri `/api/stor/v1/buckets/{bucket}/objects/{object}/{element}`.', 400); }
-        if (!array_key_exists('element', $args)) { throw new Exception('Element UUID missing in request uri `/api/stor/v1/buckets/{bucket}/objects/{object}/{element}`.', 400); }
-        if ($args['element'] == 'refs') {
+        //if (!array_key_exists('element', $args)) { throw new Exception('Element UUID missing in request uri `/api/stor/v1/buckets/{bucket}/objects/{object}/{element}`.', 400); }
+
+        if (!isset($args['element'])) {
+            $pa[] = $args['bucket'];
+            $pa[] = $args['object'];
+            $q = "
+          SELECT 
+              bin_to_uuid(o.`bucket`,1) AS `bucket`,
+              HEX(o.`hash`) AS `hash`,
+              bin_to_uuid(o.`object`,1) AS `object`, 
+              f.c_size as size,
+              f.c_mime as mime,
+              o.name as name,
+              f.c_ext as ext,
+              o.ts_created as created,
+              bin_to_uuid(bdgs.dg,1) as bucket_dg,
+              status.dev_uuid as bucket_dev
+            FROM `t_stor_objects` o
+            LEFT JOIN t_stor_files f ON f.c_hash = o.hash
+            LEFT JOIN t_stor_bucket_dgs bdgs ON bdgs.bucket = o.bucket
+            LEFT JOIN v_stor_status status ON bdgs.dg = uuid_to_bin(status.dg_uuid,1)
+            WHERE o.bucket = uuid_to_bin(? ,1) AND o.object = uuid_to_bin(? ,1) 
+            ";
+
+            $handle = $this->mysqli->execute_query($q, $pa);
+            $candidate = $handle->fetch_all(MYSQLI_ASSOC) ?? [];
+            if (!$candidate) { throw new \Exception("Trying to delete {$args['object']} object that doesn't exist"); };
+
+            $this->mysqli->begin_transaction();
+            $q1 = "delete from t_stor_objects where object = uuid_to_bin(?,1)";
+            $this->mysqli->execute_query($q1, [$args['object']]);
+            $q2 = "delete from t_stor_objects_meta where uuid = uuid_to_bin(?,1)";
+            $this->mysqli->execute_query($q2, [$args['object']]);
+            $q3 = "delete from t_stor_objects_refs where obj = uuid_to_bin(?,1) or ref_val = uuid_to_bin(?, 1)";
+            $this->mysqli->execute_query($q3, [$args['object'],$args['object']]);
+            $q4 = "INSERT INTO t_stor_objects_replicas (object, device, desired) VALUES (uuid_to_bin(?, 1), uuid_to_bin(?, 1), 0) ON DUPLICATE KEY UPDATE desired = VALUES(desired)";
+            foreach ($candidate as $replica) {
+                $this->mysqli->execute_query($q4, [$replica['object'],$replica['bucket_dev']]);
+            }
+            $this->mysqli->commit();
+            $data['status'] = 200;
+            $data['message'] = "Deleted object {$args['object']}, queued up for expunge.";
+            return $response->withJson($data);
+
+
+        } elseif ($args['element'] == 'refs') {
             $body = $request->getParsedBody();
-            if (is_null($body)) { throw new \Exception('Request body must be a valid json', 400); }
+            if (is_null($body)) {
+                throw new \Exception('Request body must be a valid json', 400);
+            }
             $this->object_refs($args['object'], $body, 'del');
             $data = [
                 'timestamp' => microtime(),
@@ -767,8 +814,9 @@ private function write_object($file, $bucket, $meta = null, $refs = null): array
             ];
             return $response->withJson($data)->withStatus(200);
         } else {
-            throw new Exception('DELETE request supported elements are: `refs`.', 400);
+            throw new Exception('DELETE request supported elements are: `refs` and NULL.', 400);
         }
+
     }
 
 
