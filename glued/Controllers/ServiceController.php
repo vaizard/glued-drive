@@ -375,7 +375,6 @@ class ServiceController extends AbstractController
     public function buckets_r1(Request $request, Response $response, array $args = []): Response {
         $params = $request->getQueryParams();
         $b = $this->get_buckets($args['id'] ?? null);
-        # TODO empty bukcets https://glued.industra.space/api/stor/v1/buckets
         if ($b == []) { throw new \Exception("Bucket `{$args['id']}` not found.", 404); }
         $data = [
             'timestamp' => microtime(),
@@ -687,6 +686,7 @@ private function write_object($file, $bucket, $meta = null, $refs = null): array
         $wm = '';
         $link = false;
         $pa = [ $args['bucket'] ];
+        $retfmt = 'collection';
 
         if (array_key_exists('object', $args)) {
             $wm .= " AND o.object = uuid_to_bin(? ,1)";
@@ -695,6 +695,8 @@ private function write_object($file, $bucket, $meta = null, $refs = null): array
             if (array_key_exists('element', $args)) {
                 if ($args['element'] == 'get') { return $response->withHeader('Location', $link)->withStatus(302); }
             }
+            $retfmt = 'object';
+
         }
 
         $qp = $request->getQueryParams();
@@ -743,7 +745,7 @@ private function write_object($file, $bucket, $meta = null, $refs = null): array
             if (isset($rr['backrefs'])) { $rr['backrefs'] = json_decode($rr['backrefs']); }
             if (isset($rr['meta'])) { $rr['meta'] = json_decode($rr['meta']); }
         }
-        if ($wm !== '') { $r = $r[0]; }
+        if ($retfmt == 'object') { $r = $r[0]; }
         if ($link) { $r['link'] = $link; }
         $data['data'] = $r;
         return $response->withJson($data);
